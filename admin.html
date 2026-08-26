@@ -59,14 +59,30 @@
         </div>
       </div>
       <div class="field">
-        <label>Banner</label>
-        <img id="cfg-banner-preview" class="banner-preview" alt="banner preview">
+        <label>Banners <span style="font-weight:400;color:var(--muted,#8a8078);">(shown as an auto-scrolling carousel)</span></label>
+        <div id="cfg-banners-list" class="banners-list"></div>
         <label class="upload-btn" style="display:block;text-align:center;">
-          Upload Photo
-          <input type="file" accept="image/jpeg,image/jpg,image/png,image/webp" style="display:none" onchange="uploadBanner(this.files[0])">
+          + Add Banner
+          <input type="file" accept="image/jpeg,image/jpg,image/png,image/webp" multiple style="display:none" onchange="uploadBanner(this.files); this.value='';">
         </label>
       </div>
       <button class="btn btn-primary btn-block" onclick="saveConfig()">Save Store Info</button>
+    </div>
+  </div>
+
+  <!-- PICKUP AVAILABILITY -->
+  <div class="section">
+    <div class="section-title">Pickup Availability</div>
+    <div class="card">
+      <div class="field">
+        <label>Block a Date</label>
+        <p class="field-hint">Customers won't be able to select these dates for pickup (holidays, fully booked days, etc). Same-day pickup is always blocked automatically, so you don't need to add today.</p>
+        <div class="add-image-row">
+          <input type="date" id="input-blackout-date">
+          <button class="btn btn-secondary" onclick="addBlackoutDate()">+ Add</button>
+        </div>
+        <div id="cfg-blackout-list" class="blackout-list"></div>
+      </div>
     </div>
   </div>
 
@@ -203,7 +219,13 @@ async function processUpload(file, folder, opts){
 const DEFAULT_RESTAURANT_CONFIG = {
   name: "My Restaurant",
   logo: "https://picsum.photos/seed/resto-logo/100/100",
-  banner: "https://picsum.photos/seed/resto-banner/800/300"
+  banners: [
+    "https://picsum.photos/seed/resto-banner/800/300",
+    "https://picsum.photos/seed/resto-banner-2/800/300",
+    "https://picsum.photos/seed/resto-banner-3/800/300"
+  ],
+  banner: "https://picsum.photos/seed/resto-banner/800/300",
+  blackoutDates: []
 };
 
 // Kept identical to the storefront's built-in defaults so "Reset to Defaults" matches.
@@ -294,8 +316,16 @@ function loadConfig(){
   try{
     const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    return parsed ? { ...DEFAULT_RESTAURANT_CONFIG, ...parsed } : { ...DEFAULT_RESTAURANT_CONFIG };
-  }catch(e){ return { ...DEFAULT_RESTAURANT_CONFIG }; }
+    return normalizeConfig(parsed ? { ...DEFAULT_RESTAURANT_CONFIG, ...parsed } : { ...DEFAULT_RESTAURANT_CONFIG });
+  }catch(e){ return normalizeConfig({ ...DEFAULT_RESTAURANT_CONFIG }); }
+}
+// Fills in "banners" (array) from the old single "banner" field if a saved
+// config predates multi-banner support, so nothing breaks for existing stores.
+function normalizeConfig(cfg){
+  if((!Array.isArray(cfg.banners) || !cfg.banners.length) && cfg.banner){
+    cfg = { ...cfg, banners: [cfg.banner] };
+  }
+  return cfg;
 }
 function persistProducts(){
   localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(products));
@@ -309,7 +339,52 @@ function persistConfig(){
 function renderConfigUI(){
   document.getElementById('cfg-name-input').value = config.name;
   document.getElementById('cfg-logo-preview').src = config.logo;
-  document.getElementById('cfg-banner-preview').src = config.banner;
+  renderBannersUI();
+  renderBlackoutUI();
+}
+function renderBlackoutUI(){
+  const list = document.getElementById('cfg-blackout-list');
+  const dates = (config.blackoutDates || []).slice().sort();
+  list.innerHTML = dates.length
+    ? dates.map(d => `
+      <div class="blackout-item">
+        <span>${formatDateLong(d)}</span>
+        <button type="button" class="banner-remove" title="Unblock this date" onclick="removeBlackoutDate('${d}')">×</button>
+      </div>
+    `).join('')
+    : `<p class="banners-empty">No blocked dates.</p>`;
+}
+function formatDateLong(yyyyMmDd){
+  const [y,m,d] = yyyyMmDd.split('-').map(Number);
+  return new Date(y, m-1, d).toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' });
+}
+function addBlackoutDate(){
+  const input = document.getElementById('input-blackout-date');
+  const value = input.value;
+  if(!value){ showToast("Pick a date first"); return; }
+  if(!Array.isArray(config.blackoutDates)) config.blackoutDates = [];
+  if(config.blackoutDates.includes(value)){ showToast("That date is already blocked"); return; }
+  config.blackoutDates.push(value);
+  persistConfig();
+  renderBlackoutUI();
+  input.value = '';
+  showToast("Date blocked");
+}
+function removeBlackoutDate(value){
+  config.blackoutDates = (config.blackoutDates || []).filter(d => d !== value);
+  persistConfig();
+  renderBlackoutUI();
+  showToast("Date unblocked");
+}
+function renderBannersUI(){
+  const list = document.getElementById('cfg-banners-list');
+  const banners = config.banners && config.banners.length ? config.banners : [];
+  list.innerHTML = banners.map((src, i) => `
+    <div class="banner-item">
+      <img src="${src}" alt="banner ${i+1}">
+      <button type="button" class="banner-remove" title="Remove banner" onclick="removeBanner(${i})">×</button>
+    </div>
+  `).join('') || `<p class="banners-empty">No banners yet — add at least one below.</p>`;
 }
 
 async function boot(){
@@ -325,7 +400,7 @@ async function boot(){
       if(snap.exists){
         const data = snap.data();
         if(Array.isArray(data.products) && data.products.length) products = data.products;
-        if(data.config) config = { ...DEFAULT_RESTAURANT_CONFIG, ...data.config };
+        if(data.config) config = normalizeConfig({ ...DEFAULT_RESTAURANT_CONFIG, ...data.config });
         localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(products));
         localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
         renderConfigUI();
@@ -341,7 +416,8 @@ async function boot(){
 function saveConfig(){
   config.name = document.getElementById('cfg-name-input').value.trim() || DEFAULT_RESTAURANT_CONFIG.name;
   config.logo = config.logo || DEFAULT_RESTAURANT_CONFIG.logo;
-  config.banner = config.banner || DEFAULT_RESTAURANT_CONFIG.banner;
+  if(!config.banners || !config.banners.length) config.banners = [...DEFAULT_RESTAURANT_CONFIG.banners];
+  config.banner = config.banners[0]; // kept in sync for anything still reading the old single-banner field
   persistConfig();
   showToast("Store info saved");
 }
@@ -359,17 +435,26 @@ async function uploadLogo(file){
   }
 }
 
-async function uploadBanner(file){
-  if(!file) return;
-  showToast("Compressing photo…");
+async function uploadBanner(fileList){
+  const files = Array.from(fileList || []);
+  if(!files.length) return;
+  showToast(files.length > 1 ? "Compressing photos…" : "Compressing photo…");
+  if(!Array.isArray(config.banners)) config.banners = [];
   try{
-    config.banner = await processUpload(file, 'banners', { maxDim:1000, quality:0.7 });
-    document.getElementById('cfg-banner-preview').src = config.banner;
-    showToast("Banner updated — remember to Save Store Info");
+    for(const file of files){
+      const dataUrl = await processUpload(file, 'banners', { maxDim:1000, quality:0.7 });
+      config.banners.push(dataUrl);
+    }
+    renderBannersUI();
+    showToast("Banner" + (files.length > 1 ? "s" : "") + " added — remember to Save Store Info");
   }catch(e){
     console.error(e);
     showToast("Couldn't process that image");
   }
+}
+function removeBanner(index){
+  config.banners.splice(index, 1);
+  renderBannersUI();
 }
 
 /* ======================= PRODUCT LIST ======================= */

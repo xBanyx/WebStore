@@ -29,7 +29,10 @@
 
   <!-- MENU VIEW -->
   <main id="menu-view">
-    <img class="banner" id="cfg-banner" alt="banner">
+    <div class="banner-carousel" id="banner-carousel">
+      <div class="banner-track" id="banner-track"></div>
+      <div class="banner-dots" id="banner-dots"></div>
+    </div>
     <div id="menu-categories"></div>
   </main>
 
@@ -121,12 +124,27 @@
 const DEFAULT_RESTAURANT_CONFIG = {
   name: "My Restaurant",
   logo: "https://picsum.photos/seed/resto-logo/100/100",
-  banner: "https://picsum.photos/seed/resto-banner/800/300"
+  // Multiple banners now supported — the storefront auto-scrolls through
+  // whichever images are in this array. "banner" (singular) is kept as a
+  // fallback for any old saved config that predates this feature.
+  banners: [
+    "https://picsum.photos/seed/resto-banner/800/300",
+    "https://picsum.photos/seed/resto-banner-2/800/300",
+    "https://picsum.photos/seed/resto-banner-3/800/300"
+  ],
+  banner: "https://picsum.photos/seed/resto-banner/800/300",
+  // Dates (YYYY-MM-DD) the store can't fulfill pickups on — holidays, fully
+  // booked days, etc. Managed from admin.html; customers just won't be able
+  // to pick these dates at checkout.
+  blackoutDates: []
 };
 
-const DELIVERY_CONFIG = { enabled: false, fee: 50 };
+const DELIVERY_CONFIG = { enabled: true, fee: 50 };
 const DISCOUNT_CONFIG  = { enabled: false, amount: 0 };
-const PICKUP_CONFIG = { enabled: true };
+// cutoffHour uses 24-hour time (17 = 5:00 PM). Orders placed at or after this
+// hour need one extra day of lead time before pickup — see getEarliestPickupDate().
+// Same-day pickup is never offered, regardless of cutoffHour.
+const PICKUP_CONFIG = { enabled: true, cutoffHour: 17 };
 
 // Facebook Messenger link shown after a customer downloads their receipt,
 // so they can send it straight to the store. Set "username" to your store's
@@ -236,8 +254,16 @@ function loadConfig(){
   try{
     const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    return parsed ? { ...DEFAULT_RESTAURANT_CONFIG, ...parsed } : DEFAULT_RESTAURANT_CONFIG;
-  }catch(e){ return DEFAULT_RESTAURANT_CONFIG; }
+    return normalizeConfig(parsed ? { ...DEFAULT_RESTAURANT_CONFIG, ...parsed } : DEFAULT_RESTAURANT_CONFIG);
+  }catch(e){ return normalizeConfig(DEFAULT_RESTAURANT_CONFIG); }
+}
+// Fills in "banners" (array) from the old single "banner" field if a saved
+// config predates multi-banner support, so nothing breaks for existing stores.
+function normalizeConfig(cfg){
+  if((!Array.isArray(cfg.banners) || !cfg.banners.length) && cfg.banner){
+    cfg = { ...cfg, banners: [cfg.banner] };
+  }
+  return cfg;
 }
 
 let PRODUCTS = loadProducts();
@@ -252,10 +278,54 @@ let lastOrder = null;
 let cartIdSeq = 1;
 
 /* ======================= INIT ======================= */
+let bannerTimer = null;
+let bannerIndex = 0;
+
+function renderBanners(){
+  const track = document.getElementById('banner-track');
+  const dots = document.getElementById('banner-dots');
+  const carousel = document.getElementById('banner-carousel');
+  const banners = (RESTAURANT_CONFIG.banners && RESTAURANT_CONFIG.banners.length)
+    ? RESTAURANT_CONFIG.banners
+    : [RESTAURANT_CONFIG.banner];
+
+  track.innerHTML = banners.map(src =>
+    `<div class="banner-slide"><img src="${src}" alt="banner"></div>`
+  ).join('');
+
+  // Dots (and auto-scroll) only make sense with more than one banner.
+  dots.innerHTML = banners.length > 1
+    ? banners.map((_, i) => `<button class="banner-dot" data-i="${i}" onclick="goToBanner(${i})"></button>`).join('')
+    : '';
+  carousel.classList.toggle('single', banners.length <= 1);
+
+  bannerIndex = 0;
+  updateBannerPosition();
+
+  clearInterval(bannerTimer);
+  if(banners.length > 1){
+    bannerTimer = setInterval(()=>{
+      goToBanner((bannerIndex + 1) % banners.length);
+    }, 4000);
+  }
+}
+function updateBannerPosition(){
+  const track = document.getElementById('banner-track');
+  track.style.transform = `translateX(-${bannerIndex * 100}%)`;
+  document.querySelectorAll('.banner-dot').forEach((dot, i)=>{
+    dot.classList.toggle('active', i === bannerIndex);
+  });
+}
+// Called by dot clicks, and by the auto-scroll timer above.
+function goToBanner(i){
+  bannerIndex = i;
+  updateBannerPosition();
+}
+
 function applyConfig(){
   document.getElementById('cfg-name').textContent = RESTAURANT_CONFIG.name;
   document.getElementById('cfg-logo').src = RESTAURANT_CONFIG.logo;
-  document.getElementById('cfg-banner').src = RESTAURANT_CONFIG.banner;
+  renderBanners();
   const loadingLogo = document.getElementById('loading-logo');
   if(loadingLogo && RESTAURANT_CONFIG.logo){
     loadingLogo.src = RESTAURANT_CONFIG.logo;
@@ -276,10 +346,12 @@ function hideLoadingScreen(){
 function init(){
   applyConfig();
 
-  // Prevent picking a pickup date in the past.
-  const todayStr = new Date().toISOString().split('T')[0];
-  document.getElementById('input-pickup-date').min = todayStr;
-  document.getElementById('input-pickup-date').value = todayStr;
+  // Prevent picking a pickup date that's too soon (same-day is never
+  // allowed) or on a blocked date — see PICKUP DATE RULES above.
+  const earliestPickup = toYMD(getEarliestPickupDate());
+  document.getElementById('input-pickup-date').min = earliestPickup;
+  document.getElementById('input-pickup-date').value = earliestPickup;
+  document.getElementById('input-pickup-date').addEventListener('change', validatePickupDate);
 
   renderMenu();
   updateCartCount();
@@ -310,7 +382,7 @@ function init(){
       const data = snap.data();
       let changed = false;
       if(Array.isArray(data.products) && data.products.length){ PRODUCTS = data.products; changed = true; }
-      if(data.config){ RESTAURANT_CONFIG = { ...DEFAULT_RESTAURANT_CONFIG, ...data.config }; changed = true; }
+      if(data.config){ RESTAURANT_CONFIG = normalizeConfig({ ...DEFAULT_RESTAURANT_CONFIG, ...data.config }); changed = true; }
       if(changed){
         try{
           localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(PRODUCTS));
@@ -620,6 +692,54 @@ function formatDateLong(yyyyMmDd){
   return dt.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' });
 }
 
+/* ======================= PICKUP DATE RULES =======================
+   - Same-day pickup is never allowed.
+   - Ordering before PICKUP_CONFIG.cutoffHour (default 5:00 PM): tomorrow
+     is the earliest pickup date.
+   - Ordering at/after cutoffHour: tomorrow is too soon, so the earliest
+     pickup date pushes to the day after tomorrow.
+   - Whatever that earliest date lands on, if it's in the admin's
+     blackoutDates list, keep moving forward a day until it isn't. */
+function toYMD(d){
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function isBlackoutDate(yyyyMmDd){
+  return (RESTAURANT_CONFIG.blackoutDates || []).includes(yyyyMmDd);
+}
+function getEarliestPickupDate(){
+  const now = new Date();
+  const leadDays = now.getHours() >= PICKUP_CONFIG.cutoffHour ? 2 : 1;
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  d.setDate(d.getDate() + leadDays);
+  while(isBlackoutDate(toYMD(d))){
+    d.setDate(d.getDate() + 1);
+  }
+  return d;
+}
+// Runs whenever the pickup date input changes (or on submit, as a backstop
+// against browsers that let a date be typed in manually). Returns true if OK.
+function validatePickupDate(){
+  const field = document.getElementById('field-pickup-date');
+  const input = document.getElementById('input-pickup-date');
+  const errEl = field.querySelector('.error-msg');
+  const value = input.value;
+  const earliestYMD = toYMD(getEarliestPickupDate());
+
+  let message = '';
+  if(value === ''){
+    message = 'Please select a pickup date.';
+  } else if(value < earliestYMD){
+    message = `Same-day/too-soon pickup isn't available. Earliest pickup is ${formatDateLong(earliestYMD)}.`;
+  } else if(isBlackoutDate(value)){
+    message = 'The store is unavailable for pickup on this date. Please choose another.';
+  }
+
+  errEl.textContent = message || errEl.textContent;
+  field.classList.toggle('invalid', message !== '');
+  return message === '';
+}
+
 function placeOrder(){
   const name = document.getElementById('input-name').value.trim();
   const phone = document.getElementById('input-phone').value.trim();
@@ -646,8 +766,7 @@ function placeOrder(){
     phoneField.classList.remove('invalid');
   }
 
-  pickupDateField.classList.toggle('invalid', pickupDate==='');
-  if(pickupDate==='') valid=false;
+  if(!validatePickupDate()) valid = false;
 
   pickupTimeField.classList.toggle('invalid', pickupTime==='');
   if(pickupTime==='') valid=false;
