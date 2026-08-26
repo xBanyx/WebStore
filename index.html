@@ -449,7 +449,7 @@ function confirmAddToCart(){
     notes
   });
 
-  updateCartCount();
+  updateCartCount(true);
   showToast(`${p.name} (${size.name}) added to cart`);
   closeModal();
 }
@@ -477,9 +477,17 @@ function clearCart(){
   updateCartCount();
   renderCart();
 }
-function updateCartCount(){
+function updateCartCount(animate){
   const total = cart.reduce((a,l)=>a+l.qty,0);
-  document.getElementById('cart-count').textContent = total;
+  const badge = document.getElementById('cart-count');
+  badge.textContent = total;
+  if(animate){
+    const btn = document.querySelector('.cart-btn');
+    // Restart the animation even if it's already mid-way from a rapid add.
+    btn.classList.remove('cart-bump');
+    void btn.offsetWidth;
+    btn.classList.add('cart-bump');
+  }
 }
 function cartTotals(){
   const subtotal = cart.reduce((a,l)=>a + l.unitPrice*l.qty, 0);

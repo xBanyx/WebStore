@@ -41,6 +41,25 @@
     background:#fff;color:var(--primary);border-radius:999px;
     font-size:12px;font-weight:700;min-width:20px;height:20px;
     display:inline-flex;align-items:center;justify-content:center;padding:0 5px;
+    transition:transform .15s ease;
+  }
+
+  /* Simple "bump" animation played on the top cart button whenever an
+     item is added, so the customer gets a satisfying bit of feedback
+     without needing to open the cart. */
+  .cart-btn.cart-bump{ animation:cart-bump-pop .45s cubic-bezier(.34,1.56,.64,1); }
+  .cart-btn.cart-bump .cart-badge{ animation:cart-badge-pop .45s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes cart-bump-pop{
+    0%{ transform:scale(1) rotate(0deg); }
+    30%{ transform:scale(1.18) rotate(-6deg); }
+    55%{ transform:scale(0.96) rotate(4deg); }
+    80%{ transform:scale(1.05) rotate(-2deg); }
+    100%{ transform:scale(1) rotate(0deg); }
+  }
+  @keyframes cart-badge-pop{
+    0%{ transform:scale(1); }
+    40%{ transform:scale(1.4); }
+    100%{ transform:scale(1); }
   }
 
   /* ---------- Banner ---------- */
