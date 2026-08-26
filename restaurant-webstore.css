@@ -28,6 +28,12 @@
     background:var(--card);
     display:flex;align-items:center;justify-content:space-between;
     padding:12px 16px;border-bottom:1px solid var(--border);
+    transition:box-shadow .2s ease;
+  }
+  /* Adds a visible shadow once the page is scrolled, so the sticky bar
+     clearly reads as floating above the content instead of blending in. */
+  .topbar.scrolled{
+    box-shadow:0 2px 10px rgba(0,0,0,.08);
   }
   .brand{display:flex;align-items:center;gap:10px;}
   .brand img{width:38px;height:38px;border-radius:50%;object-fit:cover;}

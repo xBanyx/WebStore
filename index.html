@@ -306,6 +306,16 @@ function init(){
     // No cloud configured — local/default data is already rendered above.
     hideLoadingScreen();
   }
+
+  // Gives the sticky topbar a shadow once the page is scrolled, so it
+  // clearly floats above the menu while you're browsing/ordering instead
+  // of blending into the content behind it.
+  const topbarEl = document.querySelector('.topbar');
+  if(topbarEl){
+    window.addEventListener('scroll', ()=>{
+      topbarEl.classList.toggle('scrolled', window.scrollY > 4);
+    }, { passive:true });
+  }
 }
 
 function getProduct(id){ return PRODUCTS.find(p=>p.id===id); }
