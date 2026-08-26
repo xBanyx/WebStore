@@ -139,12 +139,12 @@ const DEFAULT_RESTAURANT_CONFIG = {
   blackoutDates: []
 };
 
-const DELIVERY_CONFIG = { enabled: true, fee: 50 };
+const DELIVERY_CONFIG = { enabled: false, fee: 50 };
 const DISCOUNT_CONFIG  = { enabled: false, amount: 0 };
 // cutoffHour uses 24-hour time (17 = 5:00 PM). Orders placed at or after this
 // hour need one extra day of lead time before pickup — see getEarliestPickupDate().
 // Same-day pickup is never offered, regardless of cutoffHour.
-const PICKUP_CONFIG = { enabled: true, cutoffHour: 17 };
+const PICKUP_CONFIG = { enabled: true, cutoffHour: 15 };
 
 // Facebook Messenger link shown after a customer downloads their receipt,
 // so they can send it straight to the store. Set "username" to your store's
