@@ -129,11 +129,22 @@ const DISCOUNT_CONFIG  = { enabled: false, amount: 0 };
 const PICKUP_CONFIG = { enabled: true };
 
 // Facebook Messenger link shown after a customer downloads their receipt,
-// so they can send it straight to the store. Replace "yourpagename" with
-// your store's actual Facebook Page username (the part after facebook.com/)
-// once you have one — e.g. if your page is facebook.com/rhjeats, use
-// "rhjeats" below. m.me links open a direct Messenger chat with that page.
-const MESSENGER_CONFIG = { username: "hilda.alto.9" };
+// so they can send it straight to the store. Set "username" to your store's
+// Facebook Page username (the part after facebook.com/) — e.g. if your page
+// is facebook.com/rhjeats, use "rhjeats" below. m.me links open a direct
+// Messenger chat with that page.
+//
+// You can also paste the full Page URL here (e.g. "https://www.facebook.com/
+// hilda.alto.9") — it's cleaned up automatically below, so a stray "#",
+// trailing slash, or "www." won't break the link.
+const MESSENGER_CONFIG = (() => {
+  const raw = "hilda.alto.9";
+  const username = raw
+    .trim()
+    .replace(/^https?:\/\/(www\.)?(m\.me|facebook\.com|fb\.com)\//i, "") // strip full URL down to the page name
+    .replace(/[/#?].*$/, ""); // drop any trailing #, /, or ?query left over
+  return { username };
+})();
 
 // Local cache keys — used for an instant first paint, and as a fallback if
 // cloud sync isn't configured. See firebase-config.js: localStorage only
@@ -783,7 +794,7 @@ function showSendReceiptPopup(){
   const hasMessenger = MESSENGER_CONFIG.username && MESSENGER_CONFIG.username !== "yourpagename";
   const messengerUrl = `https://m.me/${MESSENGER_CONFIG.username}`;
   root.innerHTML = `
-    <div class="modal-backdrop" onclick="if(event.target===this) closeSendReceiptPopup()">
+    <div class="modal-backdrop send-receipt-backdrop" onclick="if(event.target===this) closeSendReceiptPopup()">
       <div class="send-receipt-sheet">
         <div class="send-receipt-icon">💬</div>
         <h3>Send the receipt here</h3>

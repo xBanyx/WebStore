@@ -332,6 +332,12 @@
 @keyframes loading-spin{ to{ transform:rotate(360deg); } }
 
 /* ======================= SEND RECEIPT POPUP ======================= */
+/* Always centered on screen (unlike the bottom-sheet product modal,
+   which intentionally docks to the bottom on mobile). */
+.send-receipt-backdrop{
+  align-items:center !important;
+  justify-content:center;
+}
 .send-receipt-sheet{
   background:var(--card, #fff); border-radius:20px;
   padding:26px 22px 22px; max-width:340px; width:calc(100% - 32px);
