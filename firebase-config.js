@@ -40,12 +40,6 @@
    pages automatically fall back to the old local-only behavior — the
    site still works, it just won't sync across devices/visitors.
    ======================================================== */
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-// Your web app's Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyBuGtpK7B3ypJi3Gp-kBlBoEb72XXRLlGA",
   authDomain: "webstore-36d31.firebaseapp.com",
@@ -54,6 +48,3 @@ const firebaseConfig = {
   messagingSenderId: "114596936869",
   appId: "1:114596936869:web:30bb4f71dc2bd2e382214c"
 };
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
