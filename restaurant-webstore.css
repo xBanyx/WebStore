@@ -283,3 +283,25 @@
   @media (min-width:1000px){
     .product-list{grid-template-columns:repeat(3,1fr);}
   }
+
+/* ======================= LOADING SCREEN ======================= */
+#loading-screen{
+  position:fixed; inset:0; z-index:9999;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:16px; background:var(--bg);
+  transition:opacity .35s ease, visibility .35s ease;
+}
+#loading-screen.hidden{ opacity:0; visibility:hidden; pointer-events:none; }
+#loading-logo{
+  width:64px; height:64px; border-radius:50%; object-fit:cover;
+  display:none; /* shown via JS only once a logo URL is available */
+}
+#loading-logo.show{ display:block; }
+.loading-spinner{
+  width:34px; height:34px; border-radius:50%;
+  border:3px solid rgba(217,72,15,0.15);
+  border-top-color:var(--primary);
+  animation:loading-spin .8s linear infinite;
+}
+.loading-text{ font-size:13px; font-weight:700; color:var(--muted, #8a8178); letter-spacing:.02em; }
+@keyframes loading-spin{ to{ transform:rotate(360deg); } }
