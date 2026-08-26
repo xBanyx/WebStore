@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>My Restaurant</title>
+<link rel="stylesheet" href="restaurant-webstore.css">
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <div class="topbar">
+    <div class="brand">
+      <img id="cfg-logo" alt="logo">
+      <span id="cfg-name"></span>
+    </div>
+    <button class="cart-btn" onclick="showView('cart')">
+      🛒 Cart <span class="cart-badge" id="cart-count">0</span>
+    </button>
+  </div>
+
+  <!-- MENU VIEW -->
+  <main id="menu-view">
+    <img class="banner" id="cfg-banner" alt="banner">
+    <div id="menu-categories"></div>
+  </main>
+
+  <!-- CART VIEW -->
+  <main id="cart-view" hidden>
+    <div class="page-header">
+      <button class="back-btn" onclick="showView('menu')">←</button>
+      <h2>Your Cart</h2>
+    </div>
+    <div id="cart-content"></div>
+  </main>
+
+  <!-- CHECKOUT VIEW -->
+  <main id="checkout-view" hidden>
+    <div class="page-header">
+      <button class="back-btn" onclick="showView('cart')">←</button>
+      <h2>Checkout</h2>
+    </div>
+    <div class="form-section">
+      <div class="field" id="field-name">
+        <label>Full Name *</label>
+        <input type="text" id="input-name" placeholder="Enter your full name">
+        <div class="error-msg">Customer Name is required.</div>
+      </div>
+      <div class="field" id="field-phone">
+        <label>Contact Number *</label>
+        <input type="tel" id="input-phone" placeholder="09XXXXXXXXX">
+        <div class="error-msg" id="phone-error">Contact Number is required.</div>
+      </div>
+      <div class="field" id="field-pickup-date">
+        <label>Pickup Date *</label>
+        <input type="date" id="input-pickup-date">
+        <div class="error-msg">Please select a pickup date.</div>
+      </div>
+      <div class="field" id="field-pickup-time">
+        <label>Pickup Time *</label>
+        <input type="time" id="input-pickup-time">
+        <div class="error-msg">Please select a pickup time.</div>
+      </div>
+
+      <div class="section-title">Order Summary</div>
+      <div id="checkout-lines"></div>
+      <div class="summary-box" id="checkout-totals" style="margin:10px 0 0;"></div>
+    </div>
+  </main>
+
+  <!-- SUCCESS / RECEIPT VIEW -->
+  <main id="success-view" hidden>
+    <div class="success-header">
+      <div class="success-check">✓</div>
+      <h2>PLEASE SAVE THIS RECEIPT AND SEND IT TO THE STORE</h2>
+      <p id="success-sub"></p>
+    </div>
+
+    <div id="receipt-mount"></div>
+
+    <div class="send-note">
+      PLEASE SAVE THIS RECEIPT AND<br>SEND IT TO THE STORE
+    </div>
+
+    <div class="success-actions">
+      <button class="btn btn-primary" onclick="downloadReceipt()">⬇ Save / Download Receipt</button>
+      <button class="btn btn-secondary" onclick="resetToMenu()">Back to Menu</button>
+    </div>
+  </main>
+
+  <!-- CART sticky action bar -->
+  <div class="action-bar" id="cart-actionbar" hidden>
+    <button class="btn btn-secondary" onclick="clearCart()">Clear Cart</button>
+    <button class="btn btn-primary" onclick="showView('checkout')">Proceed to Checkout</button>
+  </div>
+
+  <!-- CHECKOUT sticky action bar -->
+  <div class="action-bar" id="checkout-actionbar" hidden>
+    <button class="btn btn-primary" id="place-order-btn" onclick="placeOrder()">Place Order</button>
+  </div>
+
+</div>
+
+<div id="modal-root"></div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script>
+/* ========================================================
+   CONFIGURATION — edit these to reconfigure the whole store
+   ======================================================== */
+const DEFAULT_RESTAURANT_CONFIG = {
+  name: "My Restaurant",
+  logo: "https://picsum.photos/seed/resto-logo/100/100",
+  banner: "https://picsum.photos/seed/resto-banner/800/300"
+};
+
+const DELIVERY_CONFIG = { enabled: true, fee: 50 };
+const DISCOUNT_CONFIG  = { enabled: false, amount: 0 };
+const PICKUP_CONFIG = { enabled: true };
+
+// Local cache keys — used for an instant first paint, and as a fallback if
+// cloud sync isn't configured. See firebase-config.js: localStorage only
+// lives on this one device/browser, so on its own it can never be what
+// *other* visitors see — that part now comes from Firestore below.
+const PRODUCTS_STORAGE_KEY = "myresto_products_v1";
+const CONFIG_STORAGE_KEY   = "myresto_config_v1";
+
+/* ========================================================
+   CLOUD SYNC (Firebase) — see firebase-config.js.
+   When configured, this page subscribes to the same shared document
+   admin.html writes to, so every visitor sees live menu changes
+   without needing localStorage to already have anything in it.
+   ======================================================== */
+const FIREBASE_ENABLED = typeof FIREBASE_CONFIG !== 'undefined' &&
+  !!FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('YOUR_');
+
+let db = null;
+if(FIREBASE_ENABLED){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  db = firebase.firestore();
+}
+function storeDoc(){ return db.collection('stores').doc('main'); }
+
+// Each product now has:
+//  - images: a gallery of photos shown when the item is tapped
+//  - sizes: one or more { name, price } options shown in the add-to-cart popup
+// These are the built-in defaults used until an admin adds/edits items in
+// admin.html — at that point the saved copy in shared storage takes over.
+const DEFAULT_PRODUCTS = [
+  {
+    id:"chicken-inasal", name:"Chicken Inasal", description:"Grilled Filipino-style chicken",
+    images:[
+      "https://picsum.photos/seed/chicken-inasal-1/500/500",
+      "https://picsum.photos/seed/chicken-inasal-2/500/500",
+      "https://picsum.photos/seed/chicken-inasal-3/500/500"
+    ],
+    sizes:[ {name:"Regular", price:230}, {name:"Large", price:280} ],
+    category:"Meals", available:true
+  },
+  {
+    id:"carbonara", name:"Carbonara", description:"Creamy classic pasta",
+    images:[
+      "https://picsum.photos/seed/carbonara-1/500/500",
+      "https://picsum.photos/seed/carbonara-2/500/500"
+    ],
+    sizes:[ {name:"Solo", price:220}, {name:"Sharing", price:340} ],
+    category:"Meals", available:true
+  },
+  {
+    id:"sisig", name:"Sisig", description:"Sizzling chopped pork",
+    images:[
+      "https://picsum.photos/seed/sisig-1/500/500",
+      "https://picsum.photos/seed/sisig-2/500/500",
+      "https://picsum.photos/seed/sisig-3/500/500"
+    ],
+    sizes:[ {name:"Regular", price:210}, {name:"Large", price:260} ],
+    category:"Meals", available:true
+  },
+  {
+    id:"halo-halo", name:"Halo-Halo", description:"Mixed shaved ice dessert",
+    images:[
+      "https://picsum.photos/seed/halo-halo-1/500/500",
+      "https://picsum.photos/seed/halo-halo-2/500/500"
+    ],
+    sizes:[ {name:"Regular", price:120} ],
+    category:"Desserts", available:true
+  },
+  {
+    id:"iced-tea", name:"Iced Tea", description:"House-blend iced tea",
+    images:[
+      "https://picsum.photos/seed/iced-tea-1/500/500",
+      "https://picsum.photos/seed/iced-tea-2/500/500"
+    ],
+    sizes:[ {name:"16oz", price:60}, {name:"22oz", price:80} ],
+    category:"Drinks", available:true
+  }
+];
+
+/* ======================= LIVE DATA (synced with admin.html) ======================= */
+function loadProducts(){
+  try{
+    const raw = localStorage.getItem(PRODUCTS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return (Array.isArray(parsed) && parsed.length) ? parsed : DEFAULT_PRODUCTS;
+  }catch(e){ return DEFAULT_PRODUCTS; }
+}
+function loadConfig(){
+  try{
+    const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed ? { ...DEFAULT_RESTAURANT_CONFIG, ...parsed } : DEFAULT_RESTAURANT_CONFIG;
+  }catch(e){ return DEFAULT_RESTAURANT_CONFIG; }
+}
+
+let PRODUCTS = loadProducts();
+let RESTAURANT_CONFIG = loadConfig();
+
+/* ======================= STATE ======================= */
+// Cart is a list of line items (not keyed by product id) because the same
+// food can be added multiple times with different sizes/notes.
+// { cartId, productId, name, image, sizeName, unitPrice, qty, notes }
+let cart = [];
+let lastOrder = null;
+let cartIdSeq = 1;
+
+/* ======================= INIT ======================= */
+function applyConfig(){
+  document.getElementById('cfg-name').textContent = RESTAURANT_CONFIG.name;
+  document.getElementById('cfg-logo').src = RESTAURANT_CONFIG.logo;
+  document.getElementById('cfg-banner').src = RESTAURANT_CONFIG.banner;
+}
+
+function init(){
+  applyConfig();
+
+  // Prevent picking a pickup date in the past.
+  const todayStr = new Date().toISOString().split('T')[0];
+  document.getElementById('input-pickup-date').min = todayStr;
+  document.getElementById('input-pickup-date').value = todayStr;
+
+  renderMenu();
+  updateCartCount();
+
+  // If admin.html (open in another tab, same browser) saves changes, pick
+  // them up here automatically — no reload needed. This only fires for
+  // other tabs on the same device; cross-device sync is handled below.
+  window.addEventListener('storage', (e)=>{
+    if(e.key === PRODUCTS_STORAGE_KEY){
+      PRODUCTS = loadProducts();
+      renderMenu();
+    }
+    if(e.key === CONFIG_STORAGE_KEY){
+      RESTAURANT_CONFIG = loadConfig();
+      applyConfig();
+    }
+  });
+
+  // Live cloud sync: every visitor subscribes to the same document, so menu
+  // edits made in admin.html show up here automatically — no reload needed,
+  // and it's no longer limited to the admin's own browser.
+  if(FIREBASE_ENABLED){
+    storeDoc().onSnapshot(snap=>{
+      if(!snap.exists) return;
+      const data = snap.data();
+      let changed = false;
+      if(Array.isArray(data.products) && data.products.length){ PRODUCTS = data.products; changed = true; }
+      if(data.config){ RESTAURANT_CONFIG = { ...DEFAULT_RESTAURANT_CONFIG, ...data.config }; changed = true; }
+      if(changed){
+        try{
+          localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(PRODUCTS));
+          localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(RESTAURANT_CONFIG));
+        }catch(e){ /* localStorage may be full/unavailable — cloud copy still applies live */ }
+        applyConfig();
+        renderMenu();
+      }
+    }, err=>console.error('Store sync error:', err));
+  }
+}
+
+function getProduct(id){ return PRODUCTS.find(p=>p.id===id); }
+function money(n){ return "₱" + n.toLocaleString('en-PH'); }
+function basePrice(p){ return Math.min(...p.sizes.map(s=>s.price)); }
+
+/* ======================= VIEW SWITCHING ======================= */
+function showView(name){
+  ['menu','cart','checkout','success'].forEach(v=>{
+    document.getElementById(v+'-view').hidden = (v!==name);
+  });
+  document.getElementById('cart-actionbar').hidden = (name!=='cart' || cart.length===0);
+  document.getElementById('checkout-actionbar').hidden = (name!=='checkout');
+
+  if(name==='cart') renderCart();
+  if(name==='checkout') renderCheckout();
+  window.scrollTo(0,0);
+}
+
+/* ======================= MENU ======================= */
+function renderMenu(){
+  const wrap = document.getElementById('menu-categories');
+  wrap.innerHTML = '';
+  const categories = [...new Set(PRODUCTS.map(p=>p.category))];
+  categories.forEach(cat=>{
+    const title = document.createElement('div');
+    title.className='category-title'; title.textContent = cat;
+    wrap.appendChild(title);
+
+    const list = document.createElement('div');
+    list.className='product-list';
+    PRODUCTS.filter(p=>p.category===cat && p.available).forEach(p=>{
+      const priceLabel = p.sizes.length>1 ? `From ${money(basePrice(p))}` : money(basePrice(p));
+      const card = document.createElement('div');
+      card.className='product-card';
+      card.innerHTML = `
+        <img src="${p.images[0]}" alt="${p.name}" onclick="openProduct('${p.id}')">
+        <div class="product-info" onclick="openProduct('${p.id}')">
+          <h3>${p.name}</h3>
+          <p>${p.description}</p>
+          <div class="product-row">
+            <span class="price">${priceLabel}</span>
+          </div>
+        </div>
+        <button class="add-btn" onclick="openProduct('${p.id}')">ADD</button>
+      `;
+      list.appendChild(card);
+    });
+    wrap.appendChild(list);
+  });
+}
+
+/* ======================= PRODUCT MODAL (gallery + size + qty + notes) ======================= */
+let modalState = null; // { productId, sizeIdx, qty }
+
+function openProduct(id){
+  const p = getProduct(id);
+  modalState = { productId:id, sizeIdx:0, qty:1 };
+
+  const thumbs = p.images.map((img,i)=>
+    `<img class="modal-thumb ${i===0?'active':''}" src="${img}" alt="${p.name} photo ${i+1}" onclick="setModalImage(${i})">`
+  ).join('');
+
+  const sizePills = p.sizes.map((s,i)=>
+    `<button class="size-pill ${i===0?'selected':''}" id="size-pill-${i}" onclick="selectSize(${i})">${s.name} · ${money(s.price)}</button>`
+  ).join('');
+
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `
+    <div class="modal-backdrop" onclick="if(event.target===this) closeModal()">
+      <div class="modal-sheet">
+        <div class="modal-wrap">
+          <img class="modal-main-img" id="modal-main-img" src="${p.images[0]}" alt="${p.name}">
+          <button class="close-modal" onclick="closeModal()">✕</button>
+        </div>
+        ${p.images.length>1 ? `<div class="modal-thumbs">${thumbs}</div>` : ''}
+        <div class="modal-body">
+          <h2>${p.name}</h2>
+          <p>${p.description}</p>
+
+          <div class="modal-section-label">Size</div>
+          <div class="size-options">${sizePills}</div>
+
+          <div class="modal-section-label">Quantity</div>
+          <div class="modal-qty">
+            <button onclick="modalQty(-1)">−</button>
+            <span id="modal-qty-val">1</span>
+            <button onclick="modalQty(1)">+</button>
+          </div>
+
+          <div class="modal-section-label">Notes (optional)</div>
+          <textarea class="modal-notes" id="modal-notes" placeholder="e.g. less spicy, no onions"></textarea>
+
+          <button class="btn btn-primary modal-add-btn" onclick="confirmAddToCart()">
+            <span>Add to Cart</span>
+            <span id="modal-total-price">${money(p.sizes[0].price)}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function setModalImage(idx){
+  const p = getProduct(modalState.productId);
+  document.getElementById('modal-main-img').src = p.images[idx];
+  document.querySelectorAll('.modal-thumb').forEach((el,i)=>el.classList.toggle('active', i===idx));
+}
+
+function selectSize(idx){
+  modalState.sizeIdx = idx;
+  document.querySelectorAll('.size-pill').forEach((el,i)=>el.classList.toggle('selected', i===idx));
+  updateModalTotal();
+}
+
+function modalQty(delta){
+  modalState.qty = Math.max(1, modalState.qty + delta);
+  document.getElementById('modal-qty-val').textContent = modalState.qty;
+  updateModalTotal();
+}
+
+function updateModalTotal(){
+  const p = getProduct(modalState.productId);
+  const size = p.sizes[modalState.sizeIdx];
+  document.getElementById('modal-total-price').textContent = money(size.price * modalState.qty);
+}
+
+function confirmAddToCart(){
+  const p = getProduct(modalState.productId);
+  const size = p.sizes[modalState.sizeIdx];
+  const notes = document.getElementById('modal-notes').value.trim();
+
+  cart.push({
+    cartId: 'c' + (cartIdSeq++),
+    productId: p.id,
+    name: p.name,
+    image: p.images[0],
+    sizeName: size.name,
+    unitPrice: size.price,
+    qty: modalState.qty,
+    notes
+  });
+
+  updateCartCount();
+  showToast(`${p.name} (${size.name}) added to cart`);
+  closeModal();
+}
+
+function closeModal(){ document.getElementById('modal-root').innerHTML=''; modalState = null; }
+
+/* ======================= CART LOGIC ======================= */
+function findCartLine(cartId){ return cart.find(l=>l.cartId===cartId); }
+
+function changeQty(cartId, delta){
+  const line = findCartLine(cartId);
+  if(!line) return;
+  line.qty += delta;
+  if(line.qty <= 0) cart = cart.filter(l=>l.cartId!==cartId);
+  updateCartCount();
+  renderCart();
+}
+function removeItem(cartId){
+  cart = cart.filter(l=>l.cartId!==cartId);
+  updateCartCount();
+  renderCart();
+}
+function clearCart(){
+  cart = [];
+  updateCartCount();
+  renderCart();
+}
+function updateCartCount(){
+  const total = cart.reduce((a,l)=>a+l.qty,0);
+  document.getElementById('cart-count').textContent = total;
+}
+function cartTotals(){
+  const subtotal = cart.reduce((a,l)=>a + l.unitPrice*l.qty, 0);
+  const delivery = (DELIVERY_CONFIG.enabled && subtotal>0) ? DELIVERY_CONFIG.fee : 0;
+  const discount = DISCOUNT_CONFIG.enabled ? DISCOUNT_CONFIG.amount : 0;
+  const total = Math.max(0, subtotal + delivery - discount);
+  return { subtotal, delivery, discount, total };
+}
+
+function renderCart(){
+  const wrap = document.getElementById('cart-content');
+  document.getElementById('cart-actionbar').hidden = cart.length===0;
+
+  if(cart.length===0){
+    wrap.innerHTML = `
+      <div class="empty-state">
+        <h3>Your cart is empty</h3>
+        <button class="btn btn-primary" onclick="showView('menu')">Back to Menu</button>
+      </div>`;
+    return;
+  }
+
+  const t = cartTotals();
+  let itemsHtml = '<div class="cart-items">';
+  cart.forEach(line=>{
+    itemsHtml += `
+      <div class="cart-item">
+        <img src="${line.image}" alt="${line.name}">
+        <div class="cart-item-info">
+          <h4>${line.name}</h4>
+          <span class="size-tag">${line.sizeName}</span>
+          <div class="unit">${money(line.unitPrice)} × ${line.qty}</div>
+          ${line.notes ? `<div class="notes">Note: ${line.notes}</div>` : ''}
+          <div class="item-total">${money(line.unitPrice*line.qty)}</div>
+          <button class="remove-link" onclick="removeItem('${line.cartId}')">Remove</button>
+        </div>
+        <div class="qty-control">
+          <button onclick="changeQty('${line.cartId}',-1)">−</button>
+          <span>${line.qty}</span>
+          <button onclick="changeQty('${line.cartId}',1)">+</button>
+        </div>
+      </div>`;
+  });
+  itemsHtml += '</div>';
+
+  let summaryHtml = `<div class="summary-box">
+    <div class="summary-row"><span>Subtotal</span><span>${money(t.subtotal)}</span></div>`;
+  if(DELIVERY_CONFIG.enabled){
+    summaryHtml += `<div class="summary-row"><span>Delivery Fee</span><span>${money(t.delivery)}</span></div>`;
+  }
+  if(DISCOUNT_CONFIG.enabled && t.discount>0){
+    summaryHtml += `<div class="summary-row"><span>Discount</span><span>-${money(t.discount)}</span></div>`;
+  }
+  summaryHtml += `<div class="summary-row total"><span>Total</span><span>${money(t.total)}</span></div></div>`;
+
+  wrap.innerHTML = itemsHtml + summaryHtml;
+}
+
+/* ======================= CHECKOUT ======================= */
+function renderCheckout(){
+  const lines = document.getElementById('checkout-lines');
+  lines.innerHTML = cart.map(line=>`
+    <div class="order-line">
+      <div class="order-line-top">
+        <span>${line.name} (${line.sizeName}) × ${line.qty}</span>
+        <span>${money(line.unitPrice*line.qty)}</span>
+      </div>
+      ${line.notes ? `<div class="meta">Note: ${line.notes}</div>` : ''}
+    </div>
+  `).join('');
+
+  const t = cartTotals();
+  let totalsHtml = `<div class="summary-row"><span>Subtotal</span><span>${money(t.subtotal)}</span></div>`;
+  if(DELIVERY_CONFIG.enabled){
+    totalsHtml += `<div class="summary-row"><span>Delivery Fee</span><span>${money(t.delivery)}</span></div>`;
+  }
+  if(DISCOUNT_CONFIG.enabled && t.discount>0){
+    totalsHtml += `<div class="summary-row"><span>Discount</span><span>-${money(t.discount)}</span></div>`;
+  }
+  totalsHtml += `<div class="summary-row total"><span>Total</span><span>${money(t.total)}</span></div>`;
+  document.getElementById('checkout-totals').innerHTML = totalsHtml;
+}
+
+// Philippine mobile format: 09XXXXXXXXX or +639XXXXXXXXX
+function isValidPHPhone(v){
+  return /^(09\d{9}|\+639\d{9})$/.test(v.trim());
+}
+
+// "14:30" -> "2:30 PM"
+function formatTime12(hhmm){
+  const [h,m] = hhmm.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = ((h % 12) === 0) ? 12 : (h % 12);
+  return `${h12}:${String(m).padStart(2,'0')} ${period}`;
+}
+
+// "2026-08-25" -> "August 25, 2026"
+function formatDateLong(yyyyMmDd){
+  const [y,m,d] = yyyyMmDd.split('-').map(Number);
+  const dt = new Date(y, m-1, d);
+  return dt.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' });
+}
+
+function placeOrder(){
+  const name = document.getElementById('input-name').value.trim();
+  const phone = document.getElementById('input-phone').value.trim();
+  const pickupDate = document.getElementById('input-pickup-date').value;
+  const pickupTime = document.getElementById('input-pickup-time').value;
+
+  let valid = true;
+  const nameField = document.getElementById('field-name');
+  const phoneField = document.getElementById('field-phone');
+  const pickupDateField = document.getElementById('field-pickup-date');
+  const pickupTimeField = document.getElementById('field-pickup-time');
+  const phoneErr = document.getElementById('phone-error');
+
+  nameField.classList.toggle('invalid', name.length===0);
+  if(name.length===0) valid=false;
+
+  if(phone.length===0){
+    phoneErr.textContent = "Contact Number is required.";
+    phoneField.classList.add('invalid'); valid=false;
+  } else if(!isValidPHPhone(phone)){
+    phoneErr.textContent = "Please enter a valid Philippine mobile number.";
+    phoneField.classList.add('invalid'); valid=false;
+  } else {
+    phoneField.classList.remove('invalid');
+  }
+
+  pickupDateField.classList.toggle('invalid', pickupDate==='');
+  if(pickupDate==='') valid=false;
+
+  pickupTimeField.classList.toggle('invalid', pickupTime==='');
+  if(pickupTime==='') valid=false;
+
+  if(!valid) return;
+
+  const btn = document.getElementById('place-order-btn');
+  btn.disabled = true;
+  btn.textContent = "PLACING ORDER...";
+
+  // Simulate backend validation + save (server must re-validate everything
+  // and recompute totals server-side — never trust the frontend total).
+  setTimeout(()=>{
+    const t = cartTotals();
+    const items = cart.map(line=>({
+      productId: line.productId,
+      name: line.name,
+      sizeName: line.sizeName,
+      price: line.unitPrice,
+      qty: line.qty,
+      notes: line.notes,
+      itemTotal: line.unitPrice*line.qty
+    }));
+
+    lastOrder = {
+      orderNumber: generateOrderNumber(),
+      date: new Date(),
+      customerName: name,
+      contactNumber: phone,
+      pickupDate: formatDateLong(pickupDate),
+      pickupTime: formatTime12(pickupTime),
+      items,
+      subtotal: t.subtotal,
+      delivery: t.delivery,
+      discount: t.discount,
+      total: t.total
+    };
+
+    cart = [];
+    updateCartCount();
+    btn.disabled = false;
+    btn.textContent = "Place Order";
+
+    renderSuccess(lastOrder);
+    showView('success');
+  }, 700);
+}
+
+function generateOrderNumber(){
+  const d = new Date();
+  const ymd = d.getFullYear().toString() +
+    String(d.getMonth()+1).padStart(2,'0') +
+    String(d.getDate()).padStart(2,'0');
+  const seq = String(Math.floor(Math.random()*9000)+1000);
+  return `ORD-${ymd}-${seq}`;
+}
+
+/* ======================= SUCCESS + RECEIPT (HTML/CSS) ======================= */
+function renderSuccess(order){
+  document.getElementById('success-sub').textContent =
+    `Thank you, ${order.customerName}! Your order has been received.`;
+
+  const dateStr = order.date.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' });
+  const timeStr = order.date.toLocaleTimeString('en-PH', { hour:'numeric', minute:'2-digit' });
+
+  let itemsHtml = '';
+  order.items.forEach(it=>{
+    itemsHtml += `
+      <div class="r-item">
+        <div class="r-item-top">
+          <div>
+            <div class="r-item-name">${it.name} (${it.sizeName})</div>
+            <div class="r-item-qty">Qty: ${it.qty} × ${money(it.price)}</div>
+            ${it.notes ? `<div class="r-item-notes">Note: ${it.notes}</div>` : ''}
+          </div>
+          <div class="r-item-total">${money(it.itemTotal)}</div>
+        </div>
+      </div>`;
+  });
+
+  let totalsHtml = `<div><span>Subtotal</span><span>${money(order.subtotal)}</span></div>`;
+  if(DELIVERY_CONFIG.enabled){
+    totalsHtml += `<div><span>Delivery Fee</span><span>${money(order.delivery)}</span></div>`;
+  }
+  if(DISCOUNT_CONFIG.enabled && order.discount>0){
+    totalsHtml += `<div><span>Discount</span><span>-${money(order.discount)}</span></div>`;
+  }
+  totalsHtml += `<div class="r-grand"><span>TOTAL</span><span>${money(order.total)}</span></div>`;
+
+  const receiptHtml = `
+    <div id="receipt">
+      <div class="r-center">
+        <img class="r-logo" src="${RESTAURANT_CONFIG.logo}" alt="logo">
+        <div class="r-name">${RESTAURANT_CONFIG.name}</div>
+        <div class="r-sub">Order Receipt</div>
+      </div>
+      <div class="r-divider"></div>
+      <div class="r-meta">
+        <div><span>Order #</span><span>${order.orderNumber}</span></div>
+        <div><span>Date</span><span>${dateStr}</span></div>
+        <div><span>Time</span><span>${timeStr}</span></div>
+      </div>
+      <div class="r-divider"></div>
+      <div class="r-block-title">Customer</div>
+      <div class="r-cust-name">${order.customerName}</div>
+      <div class="r-cust-contact">${order.contactNumber}</div>
+      <div class="r-block-title">Pickup</div>
+      <div class="r-pickup">${order.pickupDate} · ${order.pickupTime}</div>
+      <div class="r-divider"></div>
+      <div class="r-block-title">Order</div>
+      ${itemsHtml}
+      <div class="r-divider"></div>
+      <div class="r-totals">${totalsHtml}</div>
+      <div class="r-thanks">THANK YOU!</div>
+    </div>
+  `;
+  document.getElementById('receipt-mount').innerHTML = receiptHtml;
+}
+
+// Rasterize the #receipt HTML/CSS node into a PNG and trigger a download.
+function downloadReceipt(){
+  const node = document.getElementById('receipt');
+  if(!node || !lastOrder) return;
+  html2canvas(node, { backgroundColor:'#ffffff', scale:3 }).then(canvas=>{
+    canvas.toBlob(blob=>{
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `receipt-${lastOrder.orderNumber}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showToast("Receipt saved");
+    });
+  });
+}
+
+function resetToMenu(){
+  lastOrder = null;
+  document.getElementById('receipt-mount').innerHTML = '';
+  showView('menu');
+}
+
+/* ======================= TOAST ======================= */
+let toastTimer;
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 1600);
+}
+
+init();
+</script>
+</body>
+</html>

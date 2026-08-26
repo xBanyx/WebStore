@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Store Admin — My Restaurant</title>
+<link rel="stylesheet" href="admin.css">
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+</head>
+<body>
+
+<!-- ============== LOGIN SCREEN ============== -->
+<div id="login-screen" class="login-wrap">
+  <div class="login-card">
+    <h2>Store Admin</h2>
+    <p>Enter the admin password to manage your menu.</p>
+    <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+    <div class="login-error" id="login-error">Incorrect password.</div>
+    <button class="btn btn-primary btn-block" onclick="attemptLogin()">Log In</button>
+    <div class="login-note">
+      This is a simple client-side password meant to keep casual visitors out —
+      it is not strong security (anyone who reads this page's source code can find it).
+      Change <code>ADMIN_PASSWORD</code> at the top of this file's script, and for real
+      protection, put this page behind server-side login before going live.
+    </div>
+  </div>
+</div>
+
+<!-- ============== ADMIN APP (hidden until logged in) ============== -->
+<div id="app" hidden>
+
+  <div class="topbar">
+    <h1>Store Admin</h1>
+    <div class="actions">
+      <span class="sync-badge" id="sync-badge">Checking sync…</span>
+      <a class="link-btn" href="index.html" target="_blank">View Store ↗</a>
+      <button class="link-btn" onclick="logOut()">Log Out</button>
+    </div>
+  </div>
+
+  <!-- STORE INFO -->
+  <div class="section">
+    <div class="section-title">Store Info</div>
+    <div class="card">
+      <div class="field">
+        <label>Restaurant Name</label>
+        <input type="text" id="cfg-name-input">
+      </div>
+      <div class="field">
+        <label>Logo</label>
+        <div class="logo-preview-row">
+          <img id="cfg-logo-preview" class="logo-preview" alt="logo preview">
+          <label class="upload-btn" style="flex:1;text-align:center;">
+            Upload Photo
+            <input type="file" accept="image/jpeg,image/jpg,image/png,image/webp" style="display:none" onchange="uploadLogo(this.files[0])">
+          </label>
+        </div>
+      </div>
+      <div class="field">
+        <label>Banner</label>
+        <img id="cfg-banner-preview" class="banner-preview" alt="banner preview">
+        <label class="upload-btn" style="display:block;text-align:center;">
+          Upload Photo
+          <input type="file" accept="image/jpeg,image/jpg,image/png,image/webp" style="display:none" onchange="uploadBanner(this.files[0])">
+        </label>
+      </div>
+      <button class="btn btn-primary btn-block" onclick="saveConfig()">Save Store Info</button>
+    </div>
+  </div>
+
+  <!-- MENU ITEMS -->
+  <div class="section">
+    <div class="section-title">Menu Items</div>
+    <div id="products-list"></div>
+    <button class="btn btn-secondary btn-block" onclick="addNewProduct()">+ Add New Food Item</button>
+  </div>
+
+  <div class="section">
+    <button class="btn btn-danger btn-block" onclick="resetToDefaults()">Reset Menu to Defaults</button>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ========================================================
+   ADMIN PASSWORD — change this before using the site for real.
+   This is a client-side-only check (see the login-note above).
+   ======================================================== */
+const ADMIN_PASSWORD = "admin123";
+
+/* Must match the keys used in restaurant-webstore.html exactly. */
+const PRODUCTS_STORAGE_KEY = "myresto_products_v1";
+const CONFIG_STORAGE_KEY   = "myresto_config_v1";
+
+/* ========================================================
+   CLOUD SYNC (Firebase Firestore only — no Firebase Storage).
+   See firebase-config.js. localStorage only lives on this one device,
+   so it can't be what other visitors see. When FIREBASE_CONFIG is
+   filled in, every save also writes to a shared Firestore document —
+   Firestore alone stays on Firebase's free Spark plan forever (no
+   credit card / billing account needed). Photos are compressed then
+   stored inline inside that document rather than uploaded to Firebase
+   Storage, since Storage now requires the paid Blaze plan to even set
+   up a bucket. Without Firebase configured, everything still works
+   locally, same as before.
+   ======================================================== */
+const FIREBASE_ENABLED = typeof FIREBASE_CONFIG !== 'undefined' &&
+  !!FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('YOUR_');
+
+let db = null;
+if(FIREBASE_ENABLED){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  db = firebase.firestore();
+}
+function storeDoc(){ return db.collection('stores').doc('main'); }
+
+async function persistToCloud(){
+  if(!FIREBASE_ENABLED) return;
+  try{
+    const payload = { config, products, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+    // Firestore documents cap out at 1MB. Everything here (including photos,
+    // now stored inline instead of in paid Firebase Storage) shares that
+    // budget, so warn early rather than let a save silently fail.
+    const approxBytes = new Blob([JSON.stringify(payload)]).size;
+    if(approxBytes > 900000){
+      showToast("Menu is getting close to the storage limit — try removing a few extra photos");
+    }
+    await storeDoc().set(payload);
+  }catch(e){
+    console.error(e);
+    showToast("Cloud sync failed — saved on this device only");
+  }
+}
+
+function updateSyncBadge(){
+  const el = document.getElementById('sync-badge');
+  if(!el) return;
+  if(FIREBASE_ENABLED){
+    el.textContent = "☁ Cloud sync on";
+    el.classList.add('on'); el.classList.remove('off');
+  } else {
+    el.textContent = "⚠ Local only";
+    el.classList.add('off'); el.classList.remove('on');
+    el.title = "Changes only show on this device/browser. Fill in firebase-config.js to sync for all visitors.";
+  }
+}
+
+/* ---------- Image compression ----------
+   Every uploaded photo is downscaled and re-encoded before it's stored,
+   so a multi-MB phone photo becomes a small file. This helps both modes:
+   less data written to Firebase Storage, and much less bloat in
+   localStorage's very limited quota (~5MB per browser) when running
+   without Firebase. */
+function compressImage(file, {maxDim=1280, quality=0.75}={}){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let { width, height } = img;
+        if(width > maxDim || height > maxDim){
+          if(width >= height){ height = Math.round(height * maxDim / width); width = maxDim; }
+          else { width = Math.round(width * maxDim / height); height = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        canvas.toBlob(blob=>{
+          if(blob){ resolve(blob); return; }
+          // Some browsers can't encode WebP via toBlob — fall back to JPEG.
+          canvas.toBlob(jblob=> jblob ? resolve(jblob) : reject(new Error('Compression failed')), 'image/jpeg', quality);
+        }, 'image/webp', quality);
+      };
+      img.onerror = ()=>reject(new Error('Could not read image'));
+      img.src = e.target.result;
+    };
+    reader.onerror = ()=>reject(new Error('Could not read file'));
+    reader.readAsDataURL(file);
+  });
+}
+function blobToDataURL(blob){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+// Compresses the file and returns it as an inline data URI, stored
+// directly inside the Firestore document (or localStorage if running
+// without Firebase). Kept deliberately small (see maxDim/quality below)
+// so a whole menu's worth of photos stays well under Firestore's 1MB
+// per-document limit.
+async function processUpload(file, folder, opts){
+  const blob = await compressImage(file, opts);
+  return await blobToDataURL(blob);
+}
+
+const DEFAULT_RESTAURANT_CONFIG = {
+  name: "My Restaurant",
+  logo: "https://picsum.photos/seed/resto-logo/100/100",
+  banner: "https://picsum.photos/seed/resto-banner/800/300"
+};
+
+// Kept identical to the storefront's built-in defaults so "Reset to Defaults" matches.
+const DEFAULT_PRODUCTS = [
+  {
+    id:"chicken-inasal", name:"Chicken Inasal", description:"Grilled Filipino-style chicken",
+    images:[
+      "https://picsum.photos/seed/chicken-inasal-1/500/500",
+      "https://picsum.photos/seed/chicken-inasal-2/500/500",
+      "https://picsum.photos/seed/chicken-inasal-3/500/500"
+    ],
+    sizes:[ {name:"Regular", price:230}, {name:"Large", price:280} ],
+    category:"Meals", available:true
+  },
+  {
+    id:"carbonara", name:"Carbonara", description:"Creamy classic pasta",
+    images:[
+      "https://picsum.photos/seed/carbonara-1/500/500",
+      "https://picsum.photos/seed/carbonara-2/500/500"
+    ],
+    sizes:[ {name:"Solo", price:220}, {name:"Sharing", price:340} ],
+    category:"Meals", available:true
+  },
+  {
+    id:"sisig", name:"Sisig", description:"Sizzling chopped pork",
+    images:[
+      "https://picsum.photos/seed/sisig-1/500/500",
+      "https://picsum.photos/seed/sisig-2/500/500",
+      "https://picsum.photos/seed/sisig-3/500/500"
+    ],
+    sizes:[ {name:"Regular", price:210}, {name:"Large", price:260} ],
+    category:"Meals", available:true
+  },
+  {
+    id:"halo-halo", name:"Halo-Halo", description:"Mixed shaved ice dessert",
+    images:[
+      "https://picsum.photos/seed/halo-halo-1/500/500",
+      "https://picsum.photos/seed/halo-halo-2/500/500"
+    ],
+    sizes:[ {name:"Regular", price:120} ],
+    category:"Desserts", available:true
+  },
+  {
+    id:"iced-tea", name:"Iced Tea", description:"House-blend iced tea",
+    images:[
+      "https://picsum.photos/seed/iced-tea-1/500/500",
+      "https://picsum.photos/seed/iced-tea-2/500/500"
+    ],
+    sizes:[ {name:"16oz", price:60}, {name:"22oz", price:80} ],
+    category:"Drinks", available:true
+  }
+];
+
+let products = [];
+let config = {};
+let openId = null;
+
+/* ======================= LOGIN ======================= */
+function attemptLogin(){
+  const val = document.getElementById('login-password').value;
+  if(val === ADMIN_PASSWORD){
+    document.getElementById('login-screen').hidden = true;
+    document.getElementById('app').hidden = false;
+    boot();
+  } else {
+    document.getElementById('login-error').style.display = 'block';
+  }
+}
+document.getElementById('login-password').addEventListener('keydown', e=>{
+  if(e.key === 'Enter') attemptLogin();
+});
+function logOut(){
+  document.getElementById('app').hidden = true;
+  document.getElementById('login-screen').hidden = false;
+  document.getElementById('login-password').value = '';
+  document.getElementById('login-error').style.display = 'none';
+}
+
+/* ======================= LOAD / SAVE ======================= */
+function loadProducts(){
+  try{
+    const raw = localStorage.getItem(PRODUCTS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return (Array.isArray(parsed) && parsed.length) ? parsed : JSON.parse(JSON.stringify(DEFAULT_PRODUCTS));
+  }catch(e){ return JSON.parse(JSON.stringify(DEFAULT_PRODUCTS)); }
+}
+function loadConfig(){
+  try{
+    const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed ? { ...DEFAULT_RESTAURANT_CONFIG, ...parsed } : { ...DEFAULT_RESTAURANT_CONFIG };
+  }catch(e){ return { ...DEFAULT_RESTAURANT_CONFIG }; }
+}
+function persistProducts(){
+  localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(products));
+  persistToCloud();
+}
+function persistConfig(){
+  localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+  persistToCloud();
+}
+
+function renderConfigUI(){
+  document.getElementById('cfg-name-input').value = config.name;
+  document.getElementById('cfg-logo-preview').src = config.logo;
+  document.getElementById('cfg-banner-preview').src = config.banner;
+}
+
+async function boot(){
+  updateSyncBadge();
+  products = loadProducts();
+  config = loadConfig();
+  renderConfigUI();
+  renderProducts();
+
+  if(FIREBASE_ENABLED){
+    try{
+      const snap = await storeDoc().get();
+      if(snap.exists){
+        const data = snap.data();
+        if(Array.isArray(data.products) && data.products.length) products = data.products;
+        if(data.config) config = { ...DEFAULT_RESTAURANT_CONFIG, ...data.config };
+        localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(products));
+        localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+        renderConfigUI();
+        renderProducts();
+      }
+    }catch(e){
+      console.error(e);
+      showToast("Couldn't reach cloud storage — showing the local copy");
+    }
+  }
+}
+
+function saveConfig(){
+  config.name = document.getElementById('cfg-name-input').value.trim() || DEFAULT_RESTAURANT_CONFIG.name;
+  config.logo = config.logo || DEFAULT_RESTAURANT_CONFIG.logo;
+  config.banner = config.banner || DEFAULT_RESTAURANT_CONFIG.banner;
+  persistConfig();
+  showToast("Store info saved");
+}
+
+async function uploadLogo(file){
+  if(!file) return;
+  showToast("Compressing photo…");
+  try{
+    config.logo = await processUpload(file, 'logos', { maxDim:400, quality:0.75 });
+    document.getElementById('cfg-logo-preview').src = config.logo;
+    showToast("Logo updated — remember to Save Store Info");
+  }catch(e){
+    console.error(e);
+    showToast("Couldn't process that image");
+  }
+}
+
+async function uploadBanner(file){
+  if(!file) return;
+  showToast("Compressing photo…");
+  try{
+    config.banner = await processUpload(file, 'banners', { maxDim:1000, quality:0.7 });
+    document.getElementById('cfg-banner-preview').src = config.banner;
+    showToast("Banner updated — remember to Save Store Info");
+  }catch(e){
+    console.error(e);
+    showToast("Couldn't process that image");
+  }
+}
+
+/* ======================= PRODUCT LIST ======================= */
+function money(n){ return "₱" + Number(n||0).toLocaleString('en-PH'); }
+function slugify(s){
+  return s.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') || ('item-'+Date.now());
+}
+
+function renderProducts(){
+  const wrap = document.getElementById('products-list');
+  if(products.length === 0){
+    wrap.innerHTML = `<div class="empty-note">No menu items yet. Tap "Add New Food Item" to create one.</div>`;
+    return;
+  }
+  wrap.innerHTML = products.map(p => productCardHtml(p)).join('');
+}
+
+function productCardHtml(p){
+  const cover = p.images && p.images[0] ? p.images[0] : '';
+  const priceLabel = p.sizes.length ? money(Math.min(...p.sizes.map(s=>s.price))) : '—';
+  const isOpen = openId === p.id;
+  return `
+    <div class="product-admin-card ${isOpen?'open':''}" id="card-${p.id}">
+      <div class="product-admin-head" onclick="toggleCard('${p.id}')">
+        <img src="${cover}" alt="${p.name}">
+        <div class="info">
+          <h3>${p.name || '(untitled item)'}</h3>
+          <div class="meta">${p.category || 'Uncategorized'} · From ${priceLabel} ${p.available===false ? '· Hidden' : ''}</div>
+        </div>
+        <div class="chevron">›</div>
+      </div>
+      <div class="product-admin-body">
+        ${isOpen ? productFormHtml(p) : ''}
+      </div>
+    </div>
+  `;
+}
+
+function toggleCard(id){
+  openId = (openId === id) ? null : id;
+  renderProducts();
+}
+
+function productFormHtml(p){
+  const imagesHtml = (p.images||[]).map((img,i)=>`
+    <div class="image-thumb">
+      <img src="${img}">
+      <button onclick="removeImage('${p.id}',${i})">✕</button>
+    </div>
+  `).join('');
+
+  const sizesHtml = (p.sizes||[]).map((s,i)=>`
+    <div class="size-row">
+      <input type="text" placeholder="Size name" value="${escapeAttr(s.name)}" onchange="updateSize('${p.id}',${i},'name',this.value)">
+      <input type="number" placeholder="Price" value="${s.price}" min="0" onchange="updateSize('${p.id}',${i},'price',this.value)">
+      <button onclick="removeSize('${p.id}',${i})">✕</button>
+    </div>
+  `).join('');
+
+  return `
+    <label class="avail-toggle">
+      <input type="checkbox" ${p.available!==false?'checked':''} onchange="updateField('${p.id}','available',this.checked)">
+      Visible on menu
+    </label>
+
+    <div class="field">
+      <label>Food Name</label>
+      <input type="text" value="${escapeAttr(p.name)}" onchange="updateField('${p.id}','name',this.value)">
+    </div>
+    <div class="field">
+      <label>Description</label>
+      <textarea onchange="updateField('${p.id}','description',this.value)">${p.description||''}</textarea>
+    </div>
+    <div class="field">
+      <label>Category</label>
+      <input type="text" value="${escapeAttr(p.category||'')}" onchange="updateField('${p.id}','category',this.value)">
+    </div>
+
+    <div class="field">
+      <label>Photos</label>
+      <div class="image-list">${imagesHtml}</div>
+      <div class="add-image-row">
+        <input type="text" id="img-url-${p.id}" placeholder="Paste image URL">
+        <button class="upload-btn" onclick="addImageFromUrl('${p.id}')">Add URL</button>
+      </div>
+      <label class="upload-btn" style="display:block;text-align:center;">
+        Upload Photo From Device
+        <input type="file" accept="image/jpeg,image/jpg,image/png,image/webp" style="display:none" onchange="uploadImage('${p.id}', this.files[0])">
+      </label>
+    </div>
+
+    <div class="field">
+      <label>Sizes &amp; Prices</label>
+      ${sizesHtml}
+      <button class="add-size-btn" onclick="addSize('${p.id}')">+ Add another size</button>
+    </div>
+
+    <div class="card-actions">
+      <button class="btn btn-primary btn-sm" style="flex:1" onclick="saveAll()">Save Changes</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteProduct('${p.id}')">Delete Item</button>
+    </div>
+  `;
+}
+
+function escapeAttr(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+}
+
+function getProductById(id){ return products.find(p=>p.id===id); }
+
+function updateField(id, field, value){
+  const p = getProductById(id);
+  if(!p) return;
+  p[field] = value;
+  if(field==='name'){
+    // keep the head/meta text in sync without losing the open editor
+    document.querySelector(`#card-${id} .product-admin-head h3`).textContent = value || '(untitled item)';
+  }
+}
+
+function addImageFromUrl(id){
+  const input = document.getElementById('img-url-'+id);
+  const url = input.value.trim();
+  if(!url) return;
+  const p = getProductById(id);
+  p.images = p.images || [];
+  p.images.push(url);
+  input.value = '';
+  renderProducts();
+}
+
+async function uploadImage(id, file){
+  if(!file) return;
+  showToast("Compressing photo…");
+  try{
+    const url = await processUpload(file, 'products', { maxDim:800, quality:0.7 });
+    const p = getProductById(id);
+    p.images = p.images || [];
+    p.images.push(url);
+    renderProducts();
+    showToast("Photo added — remember to Save Changes");
+  }catch(e){
+    console.error(e);
+    showToast("Couldn't process that image");
+  }
+}
+
+function removeImage(id, idx){
+  const p = getProductById(id);
+  p.images.splice(idx,1);
+  renderProducts();
+}
+
+function addSize(id){
+  const p = getProductById(id);
+  p.sizes = p.sizes || [];
+  p.sizes.push({ name:"Regular", price:0 });
+  renderProducts();
+}
+function updateSize(id, idx, field, value){
+  const p = getProductById(id);
+  p.sizes[idx][field] = (field==='price') ? Number(value)||0 : value;
+}
+function removeSize(id, idx){
+  const p = getProductById(id);
+  if(p.sizes.length <= 1){
+    showToast("An item needs at least one size");
+    return;
+  }
+  p.sizes.splice(idx,1);
+  renderProducts();
+}
+
+function addNewProduct(){
+  const id = 'item-' + Date.now();
+  products.push({
+    id,
+    name: "New Food Item",
+    description: "",
+    category: "Meals",
+    images: [],
+    sizes: [{ name:"Regular", price:0 }],
+    available: true
+  });
+  openId = id;
+  renderProducts();
+  document.getElementById('card-'+id).scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function deleteProduct(id){
+  if(!confirm("Delete this item? This can't be undone.")) return;
+  products = products.filter(p=>p.id!==id);
+  if(openId===id) openId = null;
+  saveAll();
+}
+
+function saveAll(){
+  // Re-slug empty/duplicate ids defensively, keep names non-empty.
+  products.forEach(p=>{
+    if(!p.name || !p.name.trim()) p.name = "Untitled Item";
+  });
+  persistProducts();
+  renderProducts();
+  showToast("Menu saved — changes are live on the store");
+}
+
+function resetToDefaults(){
+  if(!confirm("Reset the entire menu back to the built-in defaults? Your edits will be lost.")) return;
+  products = JSON.parse(JSON.stringify(DEFAULT_PRODUCTS));
+  config = { ...DEFAULT_RESTAURANT_CONFIG };
+  persistProducts();
+  persistConfig();
+  renderConfigUI();
+  openId = null;
+  renderProducts();
+  showToast("Menu reset to defaults");
+}
+
+/* ======================= TOAST ======================= */
+let toastTimer;
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 1800);
+}
+</script>
+</body>
+</html>
