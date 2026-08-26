@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>RHJ WebStore</title>
+<title>My Restaurant</title>
 <link rel="stylesheet" href="restaurant-webstore.css">
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
@@ -110,6 +110,7 @@
 </div>
 
 <div id="modal-root"></div>
+<div id="send-receipt-root"></div>
 <div class="toast" id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -126,6 +127,13 @@ const DEFAULT_RESTAURANT_CONFIG = {
 const DELIVERY_CONFIG = { enabled: true, fee: 50 };
 const DISCOUNT_CONFIG  = { enabled: false, amount: 0 };
 const PICKUP_CONFIG = { enabled: true };
+
+// Facebook Messenger link shown after a customer downloads their receipt,
+// so they can send it straight to the store. Replace "yourpagename" with
+// your store's actual Facebook Page username (the part after facebook.com/)
+// once you have one — e.g. if your page is facebook.com/rhjeats, use
+// "rhjeats" below. m.me links open a direct Messenger chat with that page.
+const MESSENGER_CONFIG = { username: "yourpagename" };
 
 // Local cache keys — used for an instant first paint, and as a fallback if
 // cloud sync isn't configured. See firebase-config.js: localStorage only
@@ -763,8 +771,34 @@ function downloadReceipt(){
       a.remove();
       URL.revokeObjectURL(url);
       showToast("Receipt saved");
+      showSendReceiptPopup();
     });
   });
+}
+
+// Popup shown after the receipt downloads, prompting the customer to send
+// it to the store's Messenger so the order actually gets seen.
+function showSendReceiptPopup(){
+  const root = document.getElementById('send-receipt-root');
+  const hasMessenger = MESSENGER_CONFIG.username && MESSENGER_CONFIG.username !== "yourpagename";
+  const messengerUrl = `https://m.me/${MESSENGER_CONFIG.username}`;
+  root.innerHTML = `
+    <div class="modal-backdrop" onclick="if(event.target===this) closeSendReceiptPopup()">
+      <div class="send-receipt-sheet">
+        <div class="send-receipt-icon">💬</div>
+        <h3>Send the receipt here</h3>
+        <p>Please open Messenger and send your saved receipt so we can confirm your order.</p>
+        ${hasMessenger
+          ? `<a class="btn btn-primary" href="${messengerUrl}" target="_blank" rel="noopener" onclick="closeSendReceiptPopup()">Open Messenger</a>`
+          : `<p class="send-receipt-note">Messenger link coming soon — please send it directly to the store for now.</p>`
+        }
+        <button class="btn btn-secondary" onclick="closeSendReceiptPopup()">Close</button>
+      </div>
+    </div>
+  `;
+}
+function closeSendReceiptPopup(){
+  document.getElementById('send-receipt-root').innerHTML = '';
 }
 
 function resetToMenu(){

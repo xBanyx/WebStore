@@ -330,3 +330,23 @@
 }
 .loading-text{ font-size:13px; font-weight:700; color:var(--muted, #8a8178); letter-spacing:.02em; }
 @keyframes loading-spin{ to{ transform:rotate(360deg); } }
+
+/* ======================= SEND RECEIPT POPUP ======================= */
+.send-receipt-sheet{
+  background:var(--card, #fff); border-radius:20px;
+  padding:26px 22px 22px; max-width:340px; width:calc(100% - 32px);
+  text-align:center; display:flex; flex-direction:column; gap:12px;
+  animation:send-receipt-pop .3s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes send-receipt-pop{
+  0%{ transform:scale(.9); opacity:0; }
+  100%{ transform:scale(1); opacity:1; }
+}
+.send-receipt-icon{ font-size:36px; line-height:1; }
+.send-receipt-sheet h3{ font-size:17px; font-weight:800; }
+.send-receipt-sheet p{ font-size:13.5px; color:var(--muted, #8a8078); line-height:1.4; }
+.send-receipt-sheet .btn{ width:100%; text-align:center; text-decoration:none; }
+.send-receipt-note{
+  background:var(--bg); border-radius:12px; padding:10px 12px;
+  font-size:12.5px !important; color:var(--text) !important;
+}
