@@ -377,12 +377,24 @@ if(FIREBASE_ENABLED){
       document.getElementById('login-screen').hidden = true;
       document.getElementById('app').hidden = false;
       document.getElementById('account-btn').hidden = false;
+      registerAsAdmin(user);
       boot();
     } else {
       document.getElementById('app').hidden = true;
       document.getElementById('login-screen').hidden = false;
     }
   });
+}
+
+// Marks this account as an admin in Firestore (admins/{uid}) so security
+// rules can tell store staff apart from ordinary signed-in customers —
+// see the Firestore rules notes for how this is used. Safe to call every
+// login; it just re-confirms the same doc each time.
+function registerAsAdmin(user){
+  db.collection('admins').doc(user.uid).set({
+    email: user.email,
+    lastLogin: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge: true }).catch(e=>console.error('Could not register admin record', e));
 }
 
 function attemptLogin(){

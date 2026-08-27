@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="restaurant-webstore.css">
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
 <script src="firebase-config.js"></script>
 </head>
 <body>
@@ -22,9 +23,12 @@
       <img id="cfg-logo" alt="logo">
       <span id="cfg-name"></span>
     </div>
-    <button class="cart-btn" onclick="showView('cart')">
-      🛒 Cart <span class="cart-badge" id="cart-count">0</span>
-    </button>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <a href="my-orders.html" style="font-size:12px;font-weight:700;color:var(--primary-dark);text-decoration:none;">My Orders</a>
+      <button class="cart-btn" onclick="showView('cart')">
+        🛒 Cart <span class="cart-badge" id="cart-count">0</span>
+      </button>
+    </div>
   </div>
 
   <!-- MENU VIEW -->
@@ -52,6 +56,22 @@
       <h2>Checkout</h2>
     </div>
     <div class="form-section">
+      <div class="field" id="field-signin">
+        <div class="signin-card" id="signin-card-out">
+          <div>
+            <strong>Want to track this order?</strong>
+            <p>Sign in with Google to see its status later — totally optional, you can still order as a guest.</p>
+          </div>
+          <button class="btn btn-secondary" onclick="signInWithGoogle()">Sign in with Google</button>
+        </div>
+        <div class="signin-card" id="signin-card-in" hidden>
+          <div>
+            <strong>Signed in as <span id="signin-name"></span></strong>
+            <p>This order will show up in <a href="my-orders.html">My Orders</a>.</p>
+          </div>
+          <button class="btn btn-secondary" onclick="signOutGoogle()">Sign Out</button>
+        </div>
+      </div>
       <div class="field" id="field-name">
         <label>Full Name *</label>
         <input type="text" id="input-name" placeholder="Enter your full name">
@@ -139,12 +159,12 @@ const DEFAULT_RESTAURANT_CONFIG = {
   blackoutDates: []
 };
 
-const DELIVERY_CONFIG = { enabled: false, fee: 50 };
+const DELIVERY_CONFIG = { enabled: true, fee: 50 };
 const DISCOUNT_CONFIG  = { enabled: false, amount: 0 };
 // cutoffHour uses 24-hour time (17 = 5:00 PM). Orders placed at or after this
 // hour need one extra day of lead time before pickup — see getEarliestPickupDate().
 // Same-day pickup is never offered, regardless of cutoffHour.
-const PICKUP_CONFIG = { enabled: true, cutoffHour: 15 };
+const PICKUP_CONFIG = { enabled: true, cutoffHour: 17 };
 
 // Facebook Messenger link shown after a customer downloads their receipt,
 // so they can send it straight to the store. Set "username" to your store's
@@ -182,11 +202,44 @@ const FIREBASE_ENABLED = typeof FIREBASE_CONFIG !== 'undefined' &&
   !!FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('YOUR_');
 
 let db = null;
+let auth = null;
+let currentUser = null; // the signed-in customer, if any — optional, guest checkout still works
 if(FIREBASE_ENABLED){
   firebase.initializeApp(FIREBASE_CONFIG);
   db = firebase.firestore();
+  auth = firebase.auth();
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+  auth.onAuthStateChanged(user=>{
+    currentUser = user;
+    updateSignInUI();
+  });
 }
 function storeDoc(){ return db.collection('stores').doc('main'); }
+
+/* ======================= CUSTOMER GOOGLE SIGN-IN (optional) ======================= */
+function signInWithGoogle(){
+  const provider = new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(provider).catch(e=>{
+    console.error('Google sign-in failed', e);
+    if(e.code !== 'auth/popup-closed-by-user') showToast("Couldn't sign in — please try again");
+  });
+}
+function signOutGoogle(){
+  auth.signOut();
+}
+function updateSignInUI(){
+  const out = document.getElementById('signin-card-out');
+  const inn = document.getElementById('signin-card-in');
+  if(!out || !inn) return; // checkout view not in the DOM yet on first load — fine, re-runs on state change
+  if(currentUser){
+    out.hidden = true;
+    inn.hidden = false;
+    document.getElementById('signin-name').textContent = currentUser.displayName || currentUser.email;
+  } else {
+    out.hidden = false;
+    inn.hidden = true;
+  }
+}
 
 // Each product now has:
 //  - images: a gallery of photos shown when the item is tapped
@@ -806,6 +859,11 @@ function placeOrder(){
       total: t.total,
       status: "pending"
     };
+
+    if(currentUser){
+      lastOrder.customerUid = currentUser.uid;
+      lastOrder.customerEmail = currentUser.email;
+    }
 
     saveOrder(lastOrder);
 

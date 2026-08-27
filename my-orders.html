@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>My Orders — My Restaurant</title>
+<link rel="stylesheet" href="restaurant-webstore.css">
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="firebase-config.js"></script>
+<style>
+  /* Small, page-specific styles — everything else borrows the storefront's look. */
+  #my-orders-app{max-width:480px;margin:0 auto;min-height:100vh;background:var(--bg);padding-bottom:40px;}
+  .mo-section{padding:16px;}
+  .mo-signin-card{
+    background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);
+    padding:24px 20px;text-align:center;
+  }
+  .mo-signin-card p{color:var(--muted);font-size:13.5px;margin:8px 0 18px;line-height:1.5;}
+  .mo-user-row{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:var(--card);border:1.5px solid var(--border);border-radius:12px;
+    padding:12px 14px;margin-bottom:16px;font-size:13px;
+  }
+  .mo-user-row .btn{flex-shrink:0;padding:8px 12px;font-size:12px;}
+  .mo-order-card{
+    background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);
+    padding:16px;margin-bottom:12px;
+  }
+  .mo-order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+  .mo-order-number{font-weight:800;font-size:14px;}
+  .mo-order-meta{font-size:12px;color:var(--muted);margin-top:2px;}
+  .mo-status{font-size:11px;font-weight:800;padding:4px 10px;border-radius:20px;white-space:nowrap;}
+  .mo-status.status-pending{background:#fff4e8;color:var(--primary-dark,#b8380c);}
+  .mo-status.status-completed{background:#e6f4ea;color:#1e7a3d;}
+  .mo-status.status-cancelled{background:#f5e6e6;color:#b23b3b;}
+  .mo-progress{display:flex;align-items:center;gap:4px;margin:14px 0 4px;}
+  .mo-progress-step{flex:1;height:4px;border-radius:2px;background:var(--border);}
+  .mo-progress-step.done{background:#1e7a3d;}
+  .mo-progress-step.cancelled{background:#b23b3b;}
+  .mo-progress-label{font-size:11px;color:var(--muted);margin-top:6px;}
+  .mo-items{margin-top:12px;border-top:1px solid var(--border);padding-top:10px;}
+  .mo-item-line{display:flex;justify-content:space-between;font-size:13px;padding:4px 0;}
+  .mo-total-line{display:flex;justify-content:space-between;font-size:13.5px;font-weight:800;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);}
+  .mo-empty{color:var(--muted);font-size:13.5px;text-align:center;padding:40px 20px;}
+  .mo-note{font-size:12px;color:var(--muted);text-align:center;padding:20px;line-height:1.5;}
+</style>
+</head>
+<body>
+
+<div id="my-orders-app">
+  <div class="topbar">
+    <div class="brand">
+      <span id="cfg-name">My Orders</span>
+    </div>
+    <a class="back-btn" href="index.html" style="text-decoration:none;">←</a>
+  </div>
+
+  <!-- Shown when Firebase (and therefore Google sign-in) isn't set up at all. -->
+  <div class="mo-section" id="mo-unavailable" hidden>
+    <p class="mo-note">Order tracking isn't set up for this store yet. Check back later, or contact the store directly about your order.</p>
+  </div>
+
+  <div id="mo-main" hidden>
+    <!-- SIGNED OUT -->
+    <div class="mo-section" id="mo-signed-out">
+      <div class="mo-signin-card">
+        <strong>Track your orders</strong>
+        <p>Sign in with the same Google account you used when ordering, and you'll see the status of everything you've ordered here.</p>
+        <button class="btn btn-primary" onclick="signIn()">Sign in with Google</button>
+      </div>
+    </div>
+
+    <!-- SIGNED IN -->
+    <div class="mo-section" id="mo-signed-in" hidden>
+      <div class="mo-user-row">
+        <span>Signed in as <strong id="mo-user-name"></strong></span>
+        <button class="btn btn-secondary" onclick="signOutUser()">Sign Out</button>
+      </div>
+      <div id="mo-orders-list"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const FIREBASE_ENABLED = typeof FIREBASE_CONFIG !== 'undefined' &&
+  !!FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('YOUR_');
+
+let db = null, auth = null, ordersUnsub = null;
+
+if(FIREBASE_ENABLED){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  db = firebase.firestore();
+  auth = firebase.auth();
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+  document.getElementById('mo-main').hidden = false;
+
+  auth.onAuthStateChanged(user=>{
+    if(ordersUnsub){ ordersUnsub(); ordersUnsub = null; }
+    if(user){
+      document.getElementById('mo-signed-out').hidden = true;
+      document.getElementById('mo-signed-in').hidden = false;
+      document.getElementById('mo-user-name').textContent = user.displayName || user.email;
+      subscribeToMyOrders(user.uid);
+    } else {
+      document.getElementById('mo-signed-out').hidden = false;
+      document.getElementById('mo-signed-in').hidden = true;
+    }
+  });
+
+  // Pull in the store's name for the header, same shared doc admin.html manages.
+  db.collection('stores').doc('main').get().then(snap=>{
+    const cfg = snap.data() && snap.data().config;
+    if(cfg && cfg.name) document.getElementById('cfg-name').textContent = cfg.name;
+  }).catch(()=>{});
+} else {
+  document.getElementById('mo-unavailable').hidden = false;
+}
+
+function signIn(){
+  const provider = new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(provider).catch(e=>{
+    console.error('Sign-in failed', e);
+    if(e.code !== 'auth/popup-closed-by-user') showToast("Couldn't sign in — please try again");
+  });
+}
+function signOutUser(){
+  auth.signOut();
+}
+
+// Filtered by customerUid client-side after fetching, rather than a
+// composite Firestore query, so no manual index setup is needed.
+function subscribeToMyOrders(uid){
+  ordersUnsub = db.collection('orders').where('customerUid', '==', uid)
+    .onSnapshot(snap=>{
+      const orders = snap.docs.map(d => d.data())
+        .sort((a,b) => (b.dateISO || '').localeCompare(a.dateISO || ''));
+      renderOrders(orders);
+    }, err=>{
+      console.error('Could not load orders', err);
+      showToast("Couldn't load your orders right now");
+    });
+}
+
+function money(n){ return "₱" + Number(n||0).toLocaleString('en-PH'); }
+function statusLabel(s){ return s === 'completed' ? 'Completed' : s === 'cancelled' ? 'Cancelled' : 'Pending'; }
+
+function renderOrders(orders){
+  const list = document.getElementById('mo-orders-list');
+  if(!orders.length){
+    list.innerHTML = `<p class="mo-empty">No orders yet — anything you order while signed in will show up here.</p>`;
+    return;
+  }
+  list.innerHTML = orders.map(o => {
+    const status = o.status || 'pending';
+    const orderedOn = o.dateISO ? new Date(o.dateISO).toLocaleString('en-PH', {
+      month:'short', day:'numeric', hour:'numeric', minute:'2-digit'
+    }) : '';
+    const itemsHtml = (o.items || []).map(it => `
+      <div class="mo-item-line">
+        <span>${it.qty}× ${it.name}${it.sizeName ? ' (' + it.sizeName + ')' : ''}</span>
+        <span>${money(it.itemTotal)}</span>
+      </div>
+    `).join('');
+
+    // Simple 3-step progress: Placed → Preparing → Ready — collapses to a
+    // single red bar if cancelled, since the pipeline no longer applies.
+    const step1 = 'done';
+    const step2 = status === 'completed' ? 'done' : status === 'cancelled' ? 'cancelled' : '';
+    const step3 = status === 'completed' ? 'done' : status === 'cancelled' ? 'cancelled' : '';
+    const progressLabel = status === 'completed' ? 'Ready for pickup'
+      : status === 'cancelled' ? 'This order was cancelled'
+      : 'Being prepared';
+
+    return `
+      <div class="mo-order-card">
+        <div class="mo-order-head">
+          <div>
+            <div class="mo-order-number">${o.orderNumber}</div>
+            <div class="mo-order-meta">Ordered ${orderedOn} · Pickup ${o.pickupDate} · ${o.pickupTime}</div>
+          </div>
+          <span class="mo-status status-${status}">${statusLabel(status)}</span>
+        </div>
+        <div class="mo-progress">
+          <div class="mo-progress-step ${step1}"></div>
+          <div class="mo-progress-step ${step2}"></div>
+          <div class="mo-progress-step ${step3}"></div>
+        </div>
+        <div class="mo-progress-label">${progressLabel}</div>
+        <div class="mo-items">${itemsHtml}</div>
+        <div class="mo-total-line"><span>Total</span><span>${money(o.total)}</span></div>
+      </div>
+    `;
+  }).join('');
+}
+
+let toastTimer;
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 1800);
+}
+</script>
+</body>
+</html>
