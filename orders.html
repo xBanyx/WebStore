@@ -74,6 +74,7 @@
     <div class="filter-tabs" id="filter-tabs">
       <button class="filter-tab active" data-filter="all" onclick="setFilter('all')">All</button>
       <button class="filter-tab" data-filter="pending" onclick="setFilter('pending')">Pending</button>
+      <button class="filter-tab" data-filter="approved" onclick="setFilter('approved')">Approved</button>
       <button class="filter-tab" data-filter="completed" onclick="setFilter('completed')">Completed</button>
       <button class="filter-tab" data-filter="cancelled" onclick="setFilter('cancelled')">Cancelled</button>
     </div>
@@ -350,12 +351,14 @@ function render(){
             ${o.delivery ? `<div class="order-detail-row"><strong>Delivery:</strong> ${money(o.delivery)}</div>` : ''}
             ${o.discount ? `<div class="order-detail-row"><strong>Discount:</strong> -${money(o.discount)}</div>` : ''}
             <div class="order-actions">
-              ${status !== 'cancelled' ? `
-                <button class="btn ${status === 'completed' ? 'btn-secondary' : 'btn-primary'}"
-                  onclick="event.stopPropagation(); setStatus('${o.orderNumber}', '${status === 'completed' ? 'pending' : 'completed'}')">
-                  ${status === 'completed' ? 'Mark Pending' : 'Mark Completed'}
-                </button>
+              ${status === 'pending' ? `
+                <button class="btn btn-primary" onclick="event.stopPropagation(); setStatus('${o.orderNumber}', 'approved')">✓ Approve</button>
+                <button class="btn btn-secondary" onclick="event.stopPropagation(); cancelOrder('${o.orderNumber}')">Decline</button>
+              ` : status === 'approved' ? `
+                <button class="btn btn-primary" onclick="event.stopPropagation(); setStatus('${o.orderNumber}', 'completed')">Mark Completed</button>
                 <button class="btn btn-secondary" onclick="event.stopPropagation(); cancelOrder('${o.orderNumber}')">Cancel</button>
+              ` : status === 'completed' ? `
+                <button class="btn btn-secondary" onclick="event.stopPropagation(); setStatus('${o.orderNumber}', 'approved')">Mark Approved</button>
               ` : `
                 <button class="btn btn-secondary" onclick="event.stopPropagation(); setStatus('${o.orderNumber}', 'pending')">Restore to Pending</button>
               `}
@@ -370,6 +373,7 @@ function render(){
 }
 
 function statusLabel(status){
+  if(status === 'approved') return 'Approved';
   if(status === 'completed') return 'Completed';
   if(status === 'cancelled') return 'Cancelled';
   return 'Pending';

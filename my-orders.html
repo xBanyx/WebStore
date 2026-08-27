@@ -33,6 +33,7 @@
   .mo-order-meta{font-size:12px;color:var(--muted);margin-top:2px;}
   .mo-status{font-size:11px;font-weight:800;padding:4px 10px;border-radius:20px;white-space:nowrap;}
   .mo-status.status-pending{background:#fff4e8;color:var(--primary-dark,#b8380c);}
+  .mo-status.status-approved{background:#e8f0fe;color:#1a56db;}
   .mo-status.status-completed{background:#e6f4ea;color:#1e7a3d;}
   .mo-status.status-cancelled{background:#f5e6e6;color:#b23b3b;}
   .mo-progress{display:flex;align-items:center;gap:4px;margin:14px 0 4px;}
@@ -146,7 +147,12 @@ function subscribeToMyOrders(uid){
 }
 
 function money(n){ return "₱" + Number(n||0).toLocaleString('en-PH'); }
-function statusLabel(s){ return s === 'completed' ? 'Completed' : s === 'cancelled' ? 'Cancelled' : 'Pending'; }
+function statusLabel(s){
+  if(s === 'approved') return 'Approved';
+  if(s === 'completed') return 'Completed';
+  if(s === 'cancelled') return 'Cancelled';
+  return 'Pending';
+}
 
 function renderOrders(orders){
   const list = document.getElementById('mo-orders-list');
@@ -166,14 +172,15 @@ function renderOrders(orders){
       </div>
     `).join('');
 
-    // Simple 3-step progress: Placed → Preparing → Ready — collapses to a
-    // single red bar if cancelled, since the pipeline no longer applies.
+    // 3-step progress: Placed → Approved → Ready — collapses to a single
+    // red bar if cancelled/declined, since the pipeline no longer applies.
     const step1 = 'done';
-    const step2 = status === 'completed' ? 'done' : status === 'cancelled' ? 'cancelled' : '';
+    const step2 = (status === 'approved' || status === 'completed') ? 'done' : status === 'cancelled' ? 'cancelled' : '';
     const step3 = status === 'completed' ? 'done' : status === 'cancelled' ? 'cancelled' : '';
     const progressLabel = status === 'completed' ? 'Ready for pickup'
+      : status === 'approved' ? 'Approved — being prepared'
       : status === 'cancelled' ? 'This order was cancelled'
-      : 'Being prepared';
+      : 'Waiting for the store to approve this order';
 
     return `
       <div class="mo-order-card">
