@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Store Orders — My Restaurant</title>
+<link rel="stylesheet" href="admin.css">
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="firebase-config.js"></script>
+</head>
+<body>
+
+<!-- ============== LOGIN SCREEN ============== -->
+<div id="login-screen" class="login-wrap">
+  <div class="login-card">
+    <h2>Store Orders</h2>
+
+    <div id="login-firebase">
+      <p>Sign in with your admin account to view orders.</p>
+      <input type="email" id="login-email" placeholder="Email" autocomplete="username">
+      <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+      <div class="login-error" id="login-error"></div>
+      <button class="btn btn-primary btn-block" onclick="attemptLogin()">Log In</button>
+      <button class="link-btn" style="margin-top:10px;width:100%;text-align:center;" onclick="forgotPassword()">Forgot password?</button>
+      <div class="login-note">
+        Same account as the menu admin page — manage it (or change your
+        password) from admin.html once logged in.
+      </div>
+    </div>
+
+    <div id="login-legacy" hidden>
+      <p>Enter the admin password to view orders.</p>
+      <input type="password" id="login-password-legacy" placeholder="Password" autocomplete="current-password">
+      <div class="login-error" id="login-error-legacy">Incorrect password.</div>
+      <button class="btn btn-primary btn-block" onclick="attemptLegacyLogin()">Log In</button>
+      <div class="login-note" style="color:#b23b3b;">
+        ⚠ Firebase isn't configured, so this page is using a weak, insecure
+        client-side password. Fill in firebase-config.js and set up Firebase
+        Authentication for real login security.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============== ORDERS APP (hidden until logged in) ============== -->
+<div id="app" hidden>
+
+  <div class="topbar">
+    <h1>Store Orders</h1>
+    <div class="actions">
+      <span class="sync-badge" id="sync-badge">Checking sync…</span>
+      <button class="link-btn" id="notify-btn" onclick="toggleNotifications()">🔕 Notifications</button>
+      <a class="link-btn" href="admin.html">Menu Admin</a>
+      <a class="link-btn" href="index.html" target="_blank">View Store ↗</a>
+      <button class="link-btn" onclick="logOut()">Log Out</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="filter-tabs" id="filter-tabs">
+      <button class="filter-tab active" data-filter="all" onclick="setFilter('all')">All</button>
+      <button class="filter-tab" data-filter="pending" onclick="setFilter('pending')">Pending</button>
+      <button class="filter-tab" data-filter="completed" onclick="setFilter('completed')">Completed</button>
+      <button class="filter-tab" data-filter="cancelled" onclick="setFilter('cancelled')">Cancelled</button>
+    </div>
+    <div id="orders-list"></div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Printable order slip — hidden on screen, shown only via @media print in admin.css -->
+<div id="print-area"></div>
+
+<script>
+/* ========================================================
+   FALLBACK PASSWORD — only used if Firebase isn't configured at all.
+   Real login (below) is Firebase Authentication, the same account used
+   on admin.html — see that file for the "change password" flow.
+   ======================================================== */
+const ADMIN_PASSWORD_FALLBACK = "admin123";
+
+/* Must match the key used in index.html exactly. */
+const ORDERS_STORAGE_KEY = "myresto_orders_v1";
+
+/* ========================================================
+   CLOUD SYNC (Firebase Firestore) — see firebase-config.js.
+   Reads/updates the same "orders" collection index.html writes new
+   orders into. Falls back to localStorage-only if not configured.
+   ======================================================== */
+const FIREBASE_ENABLED = typeof FIREBASE_CONFIG !== 'undefined' &&
+  !!FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('YOUR_');
+
+let db = null;
+let auth = null;
+if(FIREBASE_ENABLED){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  db = firebase.firestore();
+  auth = firebase.auth();
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+}
+function ordersCollection(){ return db.collection('orders'); }
+
+function updateSyncBadge(){
+  const el = document.getElementById('sync-badge');
+  if(!el) return;
+  if(FIREBASE_ENABLED){
+    el.textContent = "☁ Cloud sync on";
+    el.classList.add('on'); el.classList.remove('off');
+  } else {
+    el.textContent = "⚠ Local only";
+    el.classList.add('off'); el.classList.remove('on');
+    el.title = "Only orders placed on this device/browser show here. Fill in firebase-config.js to see every order.";
+  }
+}
+
+let orders = [];
+let activeFilter = 'all';
+let expandedOrder = null;
+let knownOrderNumbers = new Set(); // seeded on boot so we don't notify for pre-existing orders
+let notifyBooted = false;
+
+/* ======================= LOGIN ======================= */
+(function initLoginMode(){
+  document.getElementById('login-firebase').hidden = !FIREBASE_ENABLED;
+  document.getElementById('login-legacy').hidden = FIREBASE_ENABLED;
+})();
+
+if(FIREBASE_ENABLED){
+  auth.onAuthStateChanged(user=>{
+    if(user){
+      document.getElementById('login-screen').hidden = true;
+      document.getElementById('app').hidden = false;
+      boot();
+    } else {
+      document.getElementById('app').hidden = true;
+      document.getElementById('login-screen').hidden = false;
+    }
+  });
+}
+
+function attemptLogin(){
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  if(!email || !password){ errEl.textContent = 'Enter your email and password.'; errEl.style.display = 'block'; return; }
+  auth.signInWithEmailAndPassword(email, password)
+    .catch(e=>{ errEl.textContent = friendlyAuthError(e); errEl.style.display = 'block'; });
+}
+document.getElementById('login-password').addEventListener('keydown', e=>{
+  if(e.key === 'Enter') attemptLogin();
+});
+document.getElementById('login-password-legacy').addEventListener('keydown', e=>{
+  if(e.key === 'Enter') attemptLegacyLogin();
+});
+
+function forgotPassword(){
+  const email = document.getElementById('login-email').value.trim();
+  const errEl = document.getElementById('login-error');
+  if(!email){ errEl.textContent = 'Enter your email above first, then tap "Forgot password?" again.'; errEl.style.display = 'block'; return; }
+  auth.sendPasswordResetEmail(email)
+    .then(()=>{ errEl.style.color = '#1e7a3d'; errEl.textContent = `Password reset email sent to ${email}.`; errEl.style.display = 'block'; })
+    .catch(e=>{ errEl.style.color = ''; errEl.textContent = friendlyAuthError(e); errEl.style.display = 'block'; });
+}
+
+function friendlyAuthError(e){
+  switch(e.code){
+    case 'auth/invalid-email': return 'That email address doesn\'t look right.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential': return 'Incorrect email or password.';
+    case 'auth/too-many-requests': return 'Too many attempts — please wait a bit and try again.';
+    default: return e.message || 'Something went wrong. Please try again.';
+  }
+}
+
+/* ---- Legacy fallback (only reachable when Firebase isn't configured) ---- */
+function attemptLegacyLogin(){
+  const val = document.getElementById('login-password-legacy').value;
+  if(val === ADMIN_PASSWORD_FALLBACK){
+    document.getElementById('login-screen').hidden = true;
+    document.getElementById('app').hidden = false;
+    boot();
+  } else {
+    document.getElementById('login-error-legacy').style.display = 'block';
+  }
+}
+
+function logOut(){
+  if(FIREBASE_ENABLED){
+    auth.signOut();
+  } else {
+    document.getElementById('app').hidden = true;
+    document.getElementById('login-screen').hidden = false;
+    document.getElementById('login-password-legacy').value = '';
+    document.getElementById('login-error-legacy').style.display = 'none';
+  }
+}
+
+/* ======================= LOAD / SAVE ======================= */
+function loadOrdersLocal(){
+  try{
+    const raw = localStorage.getItem(ORDERS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(e){ return []; }
+}
+function persistOrdersLocal(){
+  try{ localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(orders)); }
+  catch(e){ console.error('Could not save orders locally', e); }
+}
+
+async function boot(){
+  updateSyncBadge();
+  updateNotifyButton();
+  orders = loadOrdersLocal();
+  knownOrderNumbers = new Set(orders.map(o => o.orderNumber));
+  render();
+
+  if(FIREBASE_ENABLED){
+    // Live updates: new orders (and status/delete changes made from another
+    // device) show up here automatically, no reload needed.
+    let firstSnapshot = true;
+    ordersCollection().orderBy('dateISO', 'desc').limit(200)
+      .onSnapshot(snap=>{
+        orders = snap.docs.map(d => d.data());
+        if(firstSnapshot){
+          // First callback just reflects what's already in the cloud —
+          // seed our known set from it, don't treat any of it as "new".
+          knownOrderNumbers = new Set(orders.map(o => o.orderNumber));
+          firstSnapshot = false;
+        } else {
+          handleNewOrders(orders);
+        }
+        persistOrdersLocal();
+        render();
+      }, err=>{
+        console.error('Order sync error:', err);
+        showToast("Couldn't reach cloud storage — showing the local copy");
+      });
+  } else {
+    // Local-only mode: catch new orders placed in another tab on this same
+    // device/browser (localStorage's "storage" event only fires cross-tab).
+    window.addEventListener('storage', e=>{
+      if(e.key !== ORDERS_STORAGE_KEY) return;
+      orders = loadOrdersLocal();
+      handleNewOrders(orders);
+      render();
+    });
+  }
+}
+
+// Compares the freshly loaded order list against what we already knew about,
+// and fires a notification + sound for anything genuinely new.
+function handleNewOrders(latestOrders){
+  const incoming = latestOrders.filter(o => !knownOrderNumbers.has(o.orderNumber));
+  incoming.forEach(o => {
+    knownOrderNumbers.add(o.orderNumber);
+    notifyNewOrder(o);
+  });
+  latestOrders.forEach(o => knownOrderNumbers.add(o.orderNumber));
+}
+
+/* ======================= RENDER ======================= */
+function setFilter(f){
+  activeFilter = f;
+  document.querySelectorAll('.filter-tab').forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.filter === f);
+  });
+  render();
+}
+
+function money(n){ return "₱" + Number(n||0).toLocaleString('en-PH'); }
+
+function render(){
+  const list = document.getElementById('orders-list');
+  const filtered = activeFilter === 'all'
+    ? orders
+    : orders.filter(o => (o.status || 'pending') === activeFilter);
+
+  if(!filtered.length){
+    list.innerHTML = `<p class="banners-empty">No ${activeFilter === 'all' ? '' : activeFilter + ' '}orders yet.</p>`;
+    return;
+  }
+
+  list.innerHTML = filtered.map(o => {
+    const status = o.status || 'pending';
+    const isExpanded = expandedOrder === o.orderNumber;
+    const orderedOn = o.dateISO ? new Date(o.dateISO).toLocaleString('en-PH', {
+      month:'short', day:'numeric', hour:'numeric', minute:'2-digit'
+    }) : '';
+    const itemsHtml = (o.items || []).map(it => `
+      <div class="order-line">
+        <div class="order-line-top">
+          <span>${it.qty}× ${it.name}${it.sizeName ? ' (' + it.sizeName + ')' : ''}</span>
+          <span>${money(it.itemTotal)}</span>
+        </div>
+        ${it.notes ? `<div class="meta">${it.notes}</div>` : ''}
+      </div>
+    `).join('');
+
+    return `
+      <div class="card order-card">
+        <div class="order-card-head" onclick="toggleExpand('${o.orderNumber}')">
+          <div>
+            <div class="order-number">${o.orderNumber}</div>
+            <div class="meta">${o.customerName} · ${orderedOn}</div>
+          </div>
+          <div class="order-card-right">
+            <span class="status-badge status-${status}">${statusLabel(status)}</span>
+            <div class="order-total">${money(o.total)}</div>
+          </div>
+        </div>
+        ${isExpanded ? `
+          <div class="order-card-body">
+            <div class="order-detail-row"><strong>Contact:</strong> ${o.contactNumber}</div>
+            <div class="order-detail-row"><strong>Pickup:</strong> ${o.pickupDate} · ${o.pickupTime}</div>
+            <div class="section-title" style="margin:14px 0 8px;">Items</div>
+            ${itemsHtml}
+            <div class="order-detail-row" style="margin-top:10px;"><strong>Subtotal:</strong> ${money(o.subtotal)}</div>
+            ${o.delivery ? `<div class="order-detail-row"><strong>Delivery:</strong> ${money(o.delivery)}</div>` : ''}
+            ${o.discount ? `<div class="order-detail-row"><strong>Discount:</strong> -${money(o.discount)}</div>` : ''}
+            <div class="order-actions">
+              ${status !== 'cancelled' ? `
+                <button class="btn ${status === 'completed' ? 'btn-secondary' : 'btn-primary'}"
+                  onclick="event.stopPropagation(); setStatus('${o.orderNumber}', '${status === 'completed' ? 'pending' : 'completed'}')">
+                  ${status === 'completed' ? 'Mark Pending' : 'Mark Completed'}
+                </button>
+                <button class="btn btn-secondary" onclick="event.stopPropagation(); cancelOrder('${o.orderNumber}')">Cancel</button>
+              ` : `
+                <button class="btn btn-secondary" onclick="event.stopPropagation(); setStatus('${o.orderNumber}', 'pending')">Restore to Pending</button>
+              `}
+              <button class="btn btn-secondary" onclick="event.stopPropagation(); printOrder('${o.orderNumber}')">🖨 Print</button>
+              <button class="btn btn-danger" onclick="event.stopPropagation(); deleteOrder('${o.orderNumber}')">Delete</button>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+function statusLabel(status){
+  if(status === 'completed') return 'Completed';
+  if(status === 'cancelled') return 'Cancelled';
+  return 'Pending';
+}
+
+function toggleExpand(orderNumber){
+  expandedOrder = expandedOrder === orderNumber ? null : orderNumber;
+  render();
+}
+
+function setStatus(orderNumber, status){
+  const order = orders.find(o => o.orderNumber === orderNumber);
+  if(!order) return;
+  order.status = status;
+  persistOrdersLocal();
+  render();
+
+  if(FIREBASE_ENABLED){
+    ordersCollection().doc(orderNumber).update({ status })
+      .catch(e=>{
+        console.error('Could not update order status in the cloud', e);
+        showToast("Saved here, but couldn't sync the status change");
+      });
+  }
+}
+
+function cancelOrder(orderNumber){
+  if(!confirm(`Cancel order ${orderNumber}? The customer should be notified separately — this only updates its status here.`)) return;
+  setStatus(orderNumber, 'cancelled');
+  showToast("Order cancelled");
+}
+
+function deleteOrder(orderNumber){
+  if(!confirm(`Permanently delete order ${orderNumber}? This can't be undone.`)) return;
+
+  orders = orders.filter(o => o.orderNumber !== orderNumber);
+  knownOrderNumbers.delete(orderNumber);
+  if(expandedOrder === orderNumber) expandedOrder = null;
+  persistOrdersLocal();
+  render();
+  showToast("Order deleted");
+
+  if(FIREBASE_ENABLED){
+    ordersCollection().doc(orderNumber).delete()
+      .catch(e=>{
+        console.error('Could not delete order in the cloud', e);
+        showToast("Deleted here, but couldn't sync the deletion");
+      });
+  }
+}
+
+/* ======================= PRINT ======================= */
+function printOrder(orderNumber){
+  const o = orders.find(x => x.orderNumber === orderNumber);
+  if(!o) return;
+  const orderedOn = o.dateISO ? new Date(o.dateISO).toLocaleString('en-PH', {
+    year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'
+  }) : '';
+  const itemsHtml = (o.items || []).map(it => `
+    <tr>
+      <td>${it.qty}× ${it.name}${it.sizeName ? ' (' + it.sizeName + ')' : ''}${it.notes ? `<br><small>${it.notes}</small>` : ''}</td>
+      <td style="text-align:right;">${money(it.itemTotal)}</td>
+    </tr>
+  `).join('');
+
+  document.getElementById('print-area').innerHTML = `
+    <h2>${o.orderNumber}</h2>
+    <p>Ordered: ${orderedOn}</p>
+    <p><strong>${o.customerName}</strong> · ${o.contactNumber}</p>
+    <p><strong>Pickup:</strong> ${o.pickupDate} · ${o.pickupTime}</p>
+    <hr>
+    <table style="width:100%;border-collapse:collapse;">${itemsHtml}</table>
+    <hr>
+    <table style="width:100%;">
+      <tr><td>Subtotal</td><td style="text-align:right;">${money(o.subtotal)}</td></tr>
+      ${o.delivery ? `<tr><td>Delivery</td><td style="text-align:right;">${money(o.delivery)}</td></tr>` : ''}
+      ${o.discount ? `<tr><td>Discount</td><td style="text-align:right;">-${money(o.discount)}</td></tr>` : ''}
+      <tr><td><strong>Total</strong></td><td style="text-align:right;"><strong>${money(o.total)}</strong></td></tr>
+    </table>
+  `;
+  window.print();
+}
+
+/* ======================= NOTIFICATIONS =======================
+   Uses the browser's Notification API — works whenever this tab is open
+   somewhere (even minimized/unfocused), but NOT if the browser is fully
+   closed. A true "notify even when closed" push needs a paid backend
+   (Firebase Cloud Function), which this static site doesn't have. */
+function updateNotifyButton(){
+  const btn = document.getElementById('notify-btn');
+  if(!('Notification' in window)){ btn.hidden = true; return; }
+  if(Notification.permission === 'granted'){
+    btn.textContent = '🔔 Notifications On';
+  } else {
+    btn.textContent = '🔕 Enable Notifications';
+  }
+}
+
+function toggleNotifications(){
+  if(!('Notification' in window)){
+    showToast("This browser doesn't support notifications");
+    return;
+  }
+  if(Notification.permission === 'granted'){
+    showToast("Notifications are already on for this browser");
+    return;
+  }
+  Notification.requestPermission().then(perm=>{
+    updateNotifyButton();
+    if(perm === 'granted'){
+      playBeep();
+      new Notification('Notifications enabled', { body: "You'll be alerted here when a new order comes in." });
+    } else {
+      showToast("Notifications weren't allowed — check your browser's site settings to enable them");
+    }
+  });
+}
+
+function notifyNewOrder(order){
+  playBeep();
+  showToast(`New order: ${order.orderNumber}`);
+  if('Notification' in window && Notification.permission === 'granted'){
+    const n = new Notification('New order received', {
+      body: `${order.customerName} · ${money(order.total)} · pickup ${order.pickupDate}`,
+      tag: order.orderNumber
+    });
+    n.onclick = () => { window.focus(); n.close(); };
+  }
+  // Also flash the tab title briefly so it's noticeable even without
+  // notification permission granted.
+  const original = document.title;
+  let flashes = 0;
+  const flashTimer = setInterval(()=>{
+    document.title = document.title === original ? '🔔 New Order!' : original;
+    flashes++;
+    if(flashes > 6){ clearInterval(flashTimer); document.title = original; }
+  }, 700);
+}
+
+function playBeep(){
+  try{
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.4);
+  }catch(e){ /* Audio not available in this context — silently skip. */ }
+}
+
+/* ======================= TOAST ======================= */
+let toastTimer;
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 1600);
+}
+</script>
+</body>
+</html>

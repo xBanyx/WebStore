@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="admin.css">
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
 <script src="firebase-config.js"></script>
 </head>
 <body>
@@ -15,15 +16,34 @@
 <div id="login-screen" class="login-wrap">
   <div class="login-card">
     <h2>Store Admin</h2>
-    <p>Enter the admin password to manage your menu.</p>
-    <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
-    <div class="login-error" id="login-error">Incorrect password.</div>
-    <button class="btn btn-primary btn-block" onclick="attemptLogin()">Log In</button>
-    <div class="login-note">
-      This is a simple client-side password meant to keep casual visitors out —
-      it is not strong security (anyone who reads this page's source code can find it).
-      Change <code>ADMIN_PASSWORD</code> at the top of this file's script, and for real
-      protection, put this page behind server-side login before going live.
+
+    <!-- Shown when Firebase is configured: real, server-verified login. -->
+    <div id="login-firebase">
+      <p>Sign in with your admin account to manage your menu.</p>
+      <input type="email" id="login-email" placeholder="Email" autocomplete="username">
+      <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+      <div class="login-error" id="login-error"></div>
+      <button class="btn btn-primary btn-block" onclick="attemptLogin()">Log In</button>
+      <button class="link-btn" style="margin-top:10px;width:100%;text-align:center;" onclick="forgotPassword()">Forgot password?</button>
+      <div class="login-note">
+        Don't have an account yet? Create one in your
+        <a href="https://console.firebase.google.com/" target="_blank">Firebase Console</a>
+        under Authentication → Users → Add user.
+      </div>
+    </div>
+
+    <!-- Fallback shown only if Firebase isn't configured — see firebase-config.js. -->
+    <div id="login-legacy" hidden>
+      <p>Enter the admin password to manage your menu.</p>
+      <input type="password" id="login-password-legacy" placeholder="Password" autocomplete="current-password">
+      <div class="login-error" id="login-error-legacy">Incorrect password.</div>
+      <button class="btn btn-primary btn-block" onclick="attemptLegacyLogin()">Log In</button>
+      <div class="login-note" style="color:#b23b3b;">
+        ⚠ Firebase isn't configured, so this page is using a weak, insecure
+        client-side password (visible to anyone who reads the page source).
+        Fill in firebase-config.js and set up Firebase Authentication for
+        real login security.
+      </div>
     </div>
   </div>
 </div>
@@ -35,12 +55,13 @@
     <h1>Store Admin</h1>
     <div class="actions">
       <span class="sync-badge" id="sync-badge">Checking sync…</span>
+      <button class="link-btn" id="account-btn" onclick="openAccountModal()" hidden>Account</button>
+      <a class="link-btn" href="orders.html">Orders</a>
       <a class="link-btn" href="index.html" target="_blank">View Store ↗</a>
       <button class="link-btn" onclick="logOut()">Log Out</button>
     </div>
   </div>
 
-  <!-- STORE INFO -->
   <div class="section">
     <div class="section-title">Store Info</div>
     <div class="card">
@@ -101,12 +122,54 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- ============== ACCOUNT MODAL ============== -->
+<div class="modal-backdrop" id="account-modal-backdrop" hidden onclick="if(event.target===this) closeAccountModal()">
+  <div class="modal-sheet">
+    <div class="modal-sheet-header">
+      <h3>Account</h3>
+      <button class="modal-close" onclick="closeAccountModal()">×</button>
+    </div>
+
+    <div class="modal-tabs">
+      <button class="modal-tab active" data-tab="password" onclick="setAccountTab('password')">Change Password</button>
+      <button class="modal-tab" data-tab="add" onclick="setAccountTab('add')">Add Teammate</button>
+    </div>
+
+    <div id="account-tab-password">
+      <div class="field">
+        <input type="password" id="cp-current" placeholder="Current password" autocomplete="current-password">
+        <input type="password" id="cp-new" placeholder="New password (min 6 characters)" autocomplete="new-password" style="margin-top:8px;">
+        <input type="password" id="cp-confirm" placeholder="Confirm new password" autocomplete="new-password" style="margin-top:8px;">
+        <div class="login-error" id="cp-error" style="margin-top:8px;"></div>
+        <button class="btn btn-primary btn-block" style="margin-top:10px;" onclick="changePassword()">Update Password</button>
+      </div>
+    </div>
+
+    <div id="account-tab-add" hidden>
+      <p class="field-hint">
+        Gives someone else their own login for this admin panel and Orders page.
+        Note: creating the account briefly signs you out (a Firebase quirk) —
+        you'll be asked to log back in with your own account right after, which
+        only takes a second.
+      </p>
+      <div class="field">
+        <input type="email" id="add-email" placeholder="Their email" autocomplete="off">
+        <input type="password" id="add-password" placeholder="Temporary password (min 6 characters)" autocomplete="new-password" style="margin-top:8px;">
+        <input type="password" id="add-confirm" placeholder="Confirm password" autocomplete="new-password" style="margin-top:8px;">
+        <div class="login-error" id="add-error" style="margin-top:8px;"></div>
+        <button class="btn btn-primary btn-block" style="margin-top:10px;" onclick="addTeammate()">Create Account</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ========================================================
-   ADMIN PASSWORD — change this before using the site for real.
-   This is a client-side-only check (see the login-note above).
+   FALLBACK PASSWORD — only used if Firebase isn't configured at all.
+   Real admin login (below) is handled by Firebase Authentication once
+   firebase-config.js is filled in, which is the actual secure path.
    ======================================================== */
-const ADMIN_PASSWORD = "admin123";
+const ADMIN_PASSWORD_FALLBACK = "admin123";
 
 /* Must match the keys used in restaurant-webstore.html exactly. */
 const PRODUCTS_STORAGE_KEY = "myresto_products_v1";
@@ -128,9 +191,12 @@ const FIREBASE_ENABLED = typeof FIREBASE_CONFIG !== 'undefined' &&
   !!FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('YOUR_');
 
 let db = null;
+let auth = null;
 if(FIREBASE_ENABLED){
   firebase.initializeApp(FIREBASE_CONFIG);
   db = firebase.firestore();
+  auth = firebase.auth();
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); // stay logged in across reloads
 }
 function storeDoc(){ return db.collection('stores').doc('main'); }
 
@@ -284,24 +350,177 @@ let config = {};
 let openId = null;
 
 /* ======================= LOGIN ======================= */
+// Which login form is shown depends on whether Firebase is configured —
+// decided once, right away, before anyone tries to log in.
+(function initLoginMode(){
+  document.getElementById('login-firebase').hidden = !FIREBASE_ENABLED;
+  document.getElementById('login-legacy').hidden = FIREBASE_ENABLED;
+})();
+
+if(FIREBASE_ENABLED){
+  // Source of truth for whether we're logged in — reacts to sign-in,
+  // sign-out, and an already-valid session on page reload alike.
+  auth.onAuthStateChanged(user=>{
+    if(user){
+      document.getElementById('login-screen').hidden = true;
+      document.getElementById('app').hidden = false;
+      document.getElementById('account-btn').hidden = false;
+      boot();
+    } else {
+      document.getElementById('app').hidden = true;
+      document.getElementById('login-screen').hidden = false;
+    }
+  });
+}
+
 function attemptLogin(){
-  const val = document.getElementById('login-password').value;
-  if(val === ADMIN_PASSWORD){
-    document.getElementById('login-screen').hidden = true;
-    document.getElementById('app').hidden = false;
-    boot();
-  } else {
-    document.getElementById('login-error').style.display = 'block';
-  }
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  if(!email || !password){ errEl.textContent = 'Enter your email and password.'; errEl.style.display = 'block'; return; }
+  auth.signInWithEmailAndPassword(email, password)
+    .catch(e=>{
+      errEl.textContent = friendlyAuthError(e);
+      errEl.style.display = 'block';
+    });
 }
 document.getElementById('login-password').addEventListener('keydown', e=>{
   if(e.key === 'Enter') attemptLogin();
 });
+document.getElementById('login-password-legacy').addEventListener('keydown', e=>{
+  if(e.key === 'Enter') attemptLegacyLogin();
+});
+
+function forgotPassword(){
+  const email = document.getElementById('login-email').value.trim();
+  const errEl = document.getElementById('login-error');
+  if(!email){ errEl.textContent = 'Enter your email above first, then tap "Forgot password?" again.'; errEl.style.display = 'block'; return; }
+  auth.sendPasswordResetEmail(email)
+    .then(()=>{ errEl.style.color = '#1e7a3d'; errEl.textContent = `Password reset email sent to ${email}.`; errEl.style.display = 'block'; })
+    .catch(e=>{ errEl.style.color = ''; errEl.textContent = friendlyAuthError(e); errEl.style.display = 'block'; });
+}
+
+function friendlyAuthError(e){
+  switch(e.code){
+    case 'auth/invalid-email': return 'That email address doesn\'t look right.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential': return 'Incorrect email or password.';
+    case 'auth/too-many-requests': return 'Too many attempts — please wait a bit and try again.';
+    default: return e.message || 'Something went wrong. Please try again.';
+  }
+}
+
+/* ---- Legacy fallback (only reachable when Firebase isn't configured) ---- */
+function attemptLegacyLogin(){
+  const val = document.getElementById('login-password-legacy').value;
+  if(val === ADMIN_PASSWORD_FALLBACK){
+    document.getElementById('login-screen').hidden = true;
+    document.getElementById('app').hidden = false;
+    boot();
+  } else {
+    document.getElementById('login-error-legacy').style.display = 'block';
+  }
+}
+
 function logOut(){
-  document.getElementById('app').hidden = true;
-  document.getElementById('login-screen').hidden = false;
-  document.getElementById('login-password').value = '';
-  document.getElementById('login-error').style.display = 'none';
+  if(FIREBASE_ENABLED){
+    auth.signOut(); // onAuthStateChanged above handles showing the login screen again
+  } else {
+    document.getElementById('app').hidden = true;
+    document.getElementById('login-screen').hidden = false;
+    document.getElementById('login-password-legacy').value = '';
+    document.getElementById('login-error-legacy').style.display = 'none';
+  }
+}
+
+/* ======================= ACCOUNT MODAL ======================= */
+function openAccountModal(){
+  document.getElementById('account-modal-backdrop').hidden = false;
+  setAccountTab('password');
+}
+function closeAccountModal(){
+  document.getElementById('account-modal-backdrop').hidden = true;
+  // Clear fields/errors so nothing lingers for next time it's opened.
+  ['cp-current','cp-new','cp-confirm','add-email','add-password','add-confirm'].forEach(id=>{
+    document.getElementById(id).value = '';
+  });
+  ['cp-error','add-error'].forEach(id=>{
+    const el = document.getElementById(id);
+    el.style.display = 'none';
+    el.style.color = '';
+  });
+}
+function setAccountTab(tab){
+  document.getElementById('account-tab-password').hidden = tab !== 'password';
+  document.getElementById('account-tab-add').hidden = tab !== 'add';
+  document.querySelectorAll('.modal-tab').forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+}
+
+/* ======================= CHANGE PASSWORD ======================= */
+function changePassword(){
+  const current = document.getElementById('cp-current').value;
+  const next = document.getElementById('cp-new').value;
+  const confirm = document.getElementById('cp-confirm').value;
+  const errEl = document.getElementById('cp-error');
+  errEl.style.color = '';
+  errEl.style.display = 'none';
+
+  if(!current || !next || !confirm){ errEl.textContent = 'Fill in all three fields.'; errEl.style.display = 'block'; return; }
+  if(next.length < 6){ errEl.textContent = 'New password needs at least 6 characters.'; errEl.style.display = 'block'; return; }
+  if(next !== confirm){ errEl.textContent = "New password and confirmation don't match."; errEl.style.display = 'block'; return; }
+
+  const user = auth.currentUser;
+  const credential = firebase.auth.EmailAuthProvider.credential(user.email, current);
+  // Firebase requires a recent login before letting you change the password —
+  // re-authenticating with the current password proves it's really them.
+  user.reauthenticateWithCredential(credential)
+    .then(()=>user.updatePassword(next))
+    .then(()=>{
+      closeAccountModal();
+      showToast("Password updated");
+    })
+    .catch(e=>{
+      errEl.textContent = friendlyAuthError(e);
+      errEl.style.display = 'block';
+    });
+}
+
+/* ======================= ADD TEAMMATE ACCOUNT =======================
+   Firebase's client SDK signs you into any account the moment it's
+   created — there's no "create without switching sessions" option
+   without a paid backend. We sign back out immediately after so you're
+   never left in the new account by surprise, then prompt a re-login. */
+function addTeammate(){
+  const email = document.getElementById('add-email').value.trim();
+  const pass = document.getElementById('add-password').value;
+  const confirm = document.getElementById('add-confirm').value;
+  const errEl = document.getElementById('add-error');
+  errEl.style.color = '';
+  errEl.style.display = 'none';
+
+  if(!email || !pass || !confirm){ errEl.textContent = 'Fill in all fields.'; errEl.style.display = 'block'; return; }
+  if(pass.length < 6){ errEl.textContent = 'Password needs at least 6 characters.'; errEl.style.display = 'block'; return; }
+  if(pass !== confirm){ errEl.textContent = "Passwords don't match."; errEl.style.display = 'block'; return; }
+
+  const myEmail = auth.currentUser.email;
+  auth.createUserWithEmailAndPassword(email, pass)
+    .then(()=>auth.signOut())
+    .then(()=>{
+      closeAccountModal();
+      document.getElementById('login-email').value = myEmail;
+      const loginErr = document.getElementById('login-error');
+      loginErr.style.color = '#1e7a3d';
+      loginErr.textContent = `Account created for ${email}. Please log back in with your own account.`;
+      loginErr.style.display = 'block';
+    })
+    .catch(e=>{
+      errEl.textContent = friendlyAuthError(e);
+      errEl.style.display = 'block';
+    });
 }
 
 /* ======================= LOAD / SAVE ======================= */
