@@ -170,6 +170,7 @@ const MESSENGER_CONFIG = (() => {
 // *other* visitors see — that part now comes from Firestore below.
 const PRODUCTS_STORAGE_KEY = "myresto_products_v1";
 const CONFIG_STORAGE_KEY   = "myresto_config_v1";
+const ORDERS_STORAGE_KEY   = "myresto_orders_v1"; // must match orders.html exactly
 
 /* ========================================================
    CLOUD SYNC (Firebase) — see firebase-config.js.
@@ -802,8 +803,11 @@ function placeOrder(){
       subtotal: t.subtotal,
       delivery: t.delivery,
       discount: t.discount,
-      total: t.total
+      total: t.total,
+      status: "pending"
     };
+
+    saveOrder(lastOrder);
 
     cart = [];
     updateCartCount();
@@ -822,6 +826,32 @@ function generateOrderNumber(){
     String(d.getDate()).padStart(2,'0');
   const seq = String(Math.floor(Math.random()*9000)+1000);
   return `ORD-${ymd}-${seq}`;
+}
+
+/* ======================= ORDER STORAGE =======================
+   Saves the placed order so the store can see it in orders.html — locally
+   right away, and to the shared Firestore "orders" collection when
+   configured, the same dual-write pattern used for products/config. */
+function saveOrder(order){
+  const record = { ...order, dateISO: order.date.toISOString() };
+  delete record.date; // Date objects aren't JSON/Firestore-safe as-is; dateISO covers it
+
+  try{
+    const raw = localStorage.getItem(ORDERS_STORAGE_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    list.unshift(record);
+    if(list.length > 300) list.length = 300; // cap local growth — orders.html reads this too
+    localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(list));
+  }catch(e){
+    console.error('Could not save order locally', e);
+  }
+
+  if(FIREBASE_ENABLED){
+    db.collection('orders').doc(order.orderNumber).set({
+      ...record,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(e=>console.error('Could not sync order to cloud', e));
+  }
 }
 
 /* ======================= SUCCESS + RECEIPT (HTML/CSS) ======================= */
