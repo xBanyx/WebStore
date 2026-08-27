@@ -52,15 +52,27 @@
 <div id="app" hidden>
 
   <div class="topbar">
+    <button class="menu-toggle" onclick="openSidebar()" aria-label="Open menu">☰</button>
     <h1>Store Admin</h1>
-    <div class="actions">
-      <span class="sync-badge" id="sync-badge">Checking sync…</span>
-      <button class="link-btn" id="account-btn" onclick="openAccountModal()" hidden>Account</button>
-      <a class="link-btn" href="orders.html">Orders</a>
-      <a class="link-btn" href="index.html" target="_blank">View Store ↗</a>
-      <button class="link-btn" onclick="logOut()">Log Out</button>
-    </div>
+    <span class="sync-badge" id="sync-badge">Checking sync…</span>
   </div>
+
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-title">Store Admin</span>
+      <button class="sidebar-close" onclick="closeSidebar()" aria-label="Close menu">×</button>
+    </div>
+    <div class="sidebar-links">
+      <span class="sidebar-link current">📋 Menu Admin</span>
+      <a class="sidebar-link" href="orders.html">🧾 Orders</a>
+      <a class="sidebar-link" href="index.html" target="_blank">🔗 View Store</a>
+      <button class="sidebar-link" id="account-btn" onclick="openAccountModal()" hidden>👤 Account</button>
+    </div>
+    <div class="sidebar-footer">
+      <button class="sidebar-link logout" onclick="logOut()">Log Out</button>
+    </div>
+  </nav>
 
   <div class="section">
     <div class="section-title">Store Info</div>
@@ -436,7 +448,20 @@ function logOut(){
 }
 
 /* ======================= ACCOUNT MODAL ======================= */
+function openSidebar(){
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sidebar-overlay').classList.add('show');
+}
+function closeSidebar(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('show');
+}
+document.addEventListener('keydown', e=>{
+  if(e.key === 'Escape') closeSidebar();
+});
+
 function openAccountModal(){
+  closeSidebar();
   document.getElementById('account-modal-backdrop').hidden = false;
   setAccountTab('password');
 }

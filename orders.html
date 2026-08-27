@@ -48,15 +48,27 @@
 <div id="app" hidden>
 
   <div class="topbar">
+    <button class="menu-toggle" onclick="openSidebar()" aria-label="Open menu">☰</button>
     <h1>Store Orders</h1>
-    <div class="actions">
-      <span class="sync-badge" id="sync-badge">Checking sync…</span>
-      <button class="link-btn" id="notify-btn" onclick="toggleNotifications()">🔕 Notifications</button>
-      <a class="link-btn" href="admin.html">Menu Admin</a>
-      <a class="link-btn" href="index.html" target="_blank">View Store ↗</a>
-      <button class="link-btn" onclick="logOut()">Log Out</button>
-    </div>
+    <span class="sync-badge" id="sync-badge">Checking sync…</span>
   </div>
+
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-title">Store Orders</span>
+      <button class="sidebar-close" onclick="closeSidebar()" aria-label="Close menu">×</button>
+    </div>
+    <div class="sidebar-links">
+      <a class="sidebar-link" href="admin.html">📋 Menu Admin</a>
+      <span class="sidebar-link current">🧾 Orders</span>
+      <a class="sidebar-link" href="index.html" target="_blank">🔗 View Store</a>
+      <button class="sidebar-link" id="notify-btn" onclick="toggleNotifications()">🔕 Notifications</button>
+    </div>
+    <div class="sidebar-footer">
+      <button class="sidebar-link logout" onclick="logOut()">Log Out</button>
+    </div>
+  </nav>
 
   <div class="section">
     <div class="filter-tabs" id="filter-tabs">
@@ -118,6 +130,19 @@ function updateSyncBadge(){
 }
 
 let orders = [];
+
+/* ======================= SIDEBAR ======================= */
+function openSidebar(){
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sidebar-overlay').classList.add('show');
+}
+function closeSidebar(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('show');
+}
+document.addEventListener('keydown', e=>{
+  if(e.key === 'Escape') closeSidebar();
+});
 let activeFilter = 'all';
 let expandedOrder = null;
 let knownOrderNumbers = new Set(); // seeded on boot so we don't notify for pre-existing orders
