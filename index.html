@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>My Restaurant</title>
+<title>RHJ WebStore</title>
 <link rel="stylesheet" href="restaurant-webstore.css">
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
@@ -166,8 +166,8 @@
    CONFIGURATION — edit these to reconfigure the whole store
    ======================================================== */
 const DEFAULT_RESTAURANT_CONFIG = {
-  name: "My Restaurant",
-  logo: "https://picsum.photos/seed/resto-logo/100/100",
+  name: "RHJ WebStore",
+  logo: "logo.jpg",
   // Multiple banners now supported — the storefront auto-scrolls through
   // whichever images are in this array. "banner" (singular) is kept as a
   // fallback for any old saved config that predates this feature.
@@ -188,7 +188,7 @@ const DISCOUNT_CONFIG  = { enabled: false, amount: 0 };
 // cutoffHour uses 24-hour time (17 = 5:00 PM). Orders placed at or after this
 // hour need one extra day of lead time before pickup — see getEarliestPickupDate().
 // Same-day pickup is never offered, regardless of cutoffHour.
-const PICKUP_CONFIG = { enabled: true, cutoffHour: 17 };
+const PICKUP_CONFIG = { enabled: true, cutoffHour: 15 };
 
 // Facebook Messenger link shown after a customer downloads their receipt,
 // so they can send it straight to the store. Set "username" to your store's
