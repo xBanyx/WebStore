@@ -65,6 +65,13 @@
       <a class="sidebar-link" href="index.html" target="_blank">🔗 View Store</a>
       <button class="sidebar-link" id="notify-btn" onclick="toggleNotifications()">🔕 Notifications</button>
     </div>
+    <div class="sidebar-print-setting">
+      <label for="print-width-select">Receipt Printer Width</label>
+      <select id="print-width-select" onchange="setPrintWidth(this.value)">
+        <option value="80mm">80mm (standard thermal)</option>
+        <option value="58mm">58mm (compact thermal)</option>
+      </select>
+    </div>
     <div class="sidebar-footer">
       <button class="sidebar-link logout" onclick="logOut()">Log Out</button>
     </div>
@@ -243,6 +250,7 @@ function persistOrdersLocal(){
 async function boot(){
   updateSyncBadge();
   updateNotifyButton();
+  document.getElementById('print-width-select').value = getPrintWidth();
   orders = loadOrdersLocal();
   knownOrderNumbers = new Set(orders.map(o => o.orderNumber));
   render();
@@ -333,7 +341,7 @@ function render(){
       <div class="card order-card">
         <div class="order-card-head" onclick="toggleExpand('${o.orderNumber}')">
           <div>
-            <div class="order-number">${o.orderNumber}</div>
+            <div class="order-number">${o.orderNumber} ${o.fulfillmentType === 'delivery' ? '🛵' : '🏪'}</div>
             <div class="meta">${o.customerName} · ${orderedOn}</div>
           </div>
           <div class="order-card-right">
@@ -344,11 +352,12 @@ function render(){
         ${isExpanded ? `
           <div class="order-card-body">
             <div class="order-detail-row"><strong>Contact:</strong> ${o.contactNumber}</div>
-            <div class="order-detail-row"><strong>Pickup:</strong> ${o.pickupDate} · ${o.pickupTime}</div>
+            <div class="order-detail-row"><strong>${o.fulfillmentType === 'delivery' ? 'Delivery' : 'Pickup'}:</strong> ${o.pickupDate} · ${o.pickupTime}</div>
+            ${o.fulfillmentType === 'delivery' ? `<div class="order-detail-row"><strong>Address:</strong> ${o.deliveryAddress || '—'}</div>` : ''}
             <div class="section-title" style="margin:14px 0 8px;">Items</div>
             ${itemsHtml}
             <div class="order-detail-row" style="margin-top:10px;"><strong>Subtotal:</strong> ${money(o.subtotal)}</div>
-            ${o.delivery ? `<div class="order-detail-row"><strong>Delivery:</strong> ${money(o.delivery)}</div>` : ''}
+            ${o.delivery ? `<div class="order-detail-row"><strong>Delivery Fee:</strong> ${money(o.delivery)}</div>` : ''}
             ${o.discount ? `<div class="order-detail-row"><strong>Discount:</strong> -${money(o.discount)}</div>` : ''}
             <div class="order-actions">
               ${status === 'pending' ? `
@@ -425,34 +434,70 @@ function deleteOrder(orderNumber){
   }
 }
 
-/* ======================= PRINT ======================= */
+/* ======================= PRINT (thermal receipt) ======================= */
+const PRINT_WIDTH_KEY = "myresto_print_width_v1"; // remembers your printer's paper width between visits
+function getPrintWidth(){
+  try{ return localStorage.getItem(PRINT_WIDTH_KEY) || '80mm'; }catch(e){ return '80mm'; }
+}
+function setPrintWidth(w){
+  try{ localStorage.setItem(PRINT_WIDTH_KEY, w); }catch(e){}
+}
+
 function printOrder(orderNumber){
   const o = orders.find(x => x.orderNumber === orderNumber);
   if(!o) return;
+  const width = getPrintWidth();
+
+  // @page controls the actual paper size the print dialog/driver uses —
+  // most thermal POS printers register as a continuous roll at this width.
+  // Rewritten on every print in case the width was just changed.
+  let pageStyle = document.getElementById('print-page-size');
+  if(!pageStyle){
+    pageStyle = document.createElement('style');
+    pageStyle.id = 'print-page-size';
+    document.head.appendChild(pageStyle);
+  }
+  pageStyle.textContent = `@page { size: ${width} auto; margin: 0; }`;
+  document.getElementById('print-area').className = `receipt-${width}`;
+
   const orderedOn = o.dateISO ? new Date(o.dateISO).toLocaleString('en-PH', {
     year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'
   }) : '';
+
   const itemsHtml = (o.items || []).map(it => `
-    <tr>
-      <td>${it.qty}× ${it.name}${it.sizeName ? ' (' + it.sizeName + ')' : ''}${it.notes ? `<br><small>${it.notes}</small>` : ''}</td>
-      <td style="text-align:right;">${money(it.itemTotal)}</td>
-    </tr>
+    <div class="receipt-item">
+      <div class="receipt-row">
+        <span>${it.qty}× ${it.name}${it.sizeName ? ' (' + it.sizeName + ')' : ''}</span>
+        <span>${money(it.itemTotal)}</span>
+      </div>
+      ${it.notes ? `<div class="receipt-note">${it.notes}</div>` : ''}
+    </div>
   `).join('');
 
   document.getElementById('print-area').innerHTML = `
-    <h2>${o.orderNumber}</h2>
-    <p>Ordered: ${orderedOn}</p>
-    <p><strong>${o.customerName}</strong> · ${o.contactNumber}</p>
-    <p><strong>Pickup:</strong> ${o.pickupDate} · ${o.pickupTime}</p>
-    <hr>
-    <table style="width:100%;border-collapse:collapse;">${itemsHtml}</table>
-    <hr>
-    <table style="width:100%;">
-      <tr><td>Subtotal</td><td style="text-align:right;">${money(o.subtotal)}</td></tr>
-      ${o.delivery ? `<tr><td>Delivery</td><td style="text-align:right;">${money(o.delivery)}</td></tr>` : ''}
-      ${o.discount ? `<tr><td>Discount</td><td style="text-align:right;">-${money(o.discount)}</td></tr>` : ''}
-      <tr><td><strong>Total</strong></td><td style="text-align:right;"><strong>${money(o.total)}</strong></td></tr>
-    </table>
+    <div class="receipt-center">
+      <div class="receipt-title">ORDER RECEIPT</div>
+      <div class="receipt-order-number">${o.orderNumber}</div>
+      <div>${orderedOn}</div>
+    </div>
+    <div class="receipt-dash"></div>
+    <div class="receipt-row"><span>Customer</span><span>${o.customerName}</span></div>
+    <div class="receipt-row"><span>Contact</span><span>${o.contactNumber}</span></div>
+    <div class="receipt-dash"></div>
+    <div class="receipt-fulfillment-label">${o.fulfillmentType === 'delivery' ? '🛵 FOR DELIVERY' : '🏪 FOR PICKUP'}</div>
+    <div class="receipt-row receipt-detail"><span>${o.fulfillmentType === 'delivery' ? 'Date' : 'Date'}</span><span>${o.pickupDate}</span></div>
+    <div class="receipt-row receipt-detail"><span>Time</span><span>${o.pickupTime}</span></div>
+    ${o.fulfillmentType === 'delivery' ? `<div class="receipt-address"><strong>Deliver to:</strong><br>${o.deliveryAddress || '—'}</div>` : ''}
+    <div class="receipt-dash"></div>
+    ${itemsHtml}
+    <div class="receipt-dash"></div>
+    <div class="receipt-row"><span>Subtotal</span><span>${money(o.subtotal)}</span></div>
+    ${o.delivery ? `<div class="receipt-row"><span>Delivery Fee</span><span>${money(o.delivery)}</span></div>` : ''}
+    ${o.discount ? `<div class="receipt-row"><span>Discount</span><span>-${money(o.discount)}</span></div>` : ''}
+    <div class="receipt-dash"></div>
+    <div class="receipt-row receipt-grand-total"><span>TOTAL</span><span>${money(o.total)}</span></div>
+    <div class="receipt-dash"></div>
+    <div class="receipt-center receipt-footer">Thank you!</div>
   `;
   window.print();
 }

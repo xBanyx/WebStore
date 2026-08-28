@@ -187,7 +187,8 @@ function renderOrders(orders){
         <div class="mo-order-head">
           <div>
             <div class="mo-order-number">${o.orderNumber}</div>
-            <div class="mo-order-meta">Ordered ${orderedOn} · Pickup ${o.pickupDate} · ${o.pickupTime}</div>
+            <div class="mo-order-meta">Ordered ${orderedOn} · ${o.fulfillmentType === 'delivery' ? '🛵 Delivery' : '🏪 Pickup'} ${o.pickupDate} · ${o.pickupTime}</div>
+            ${o.fulfillmentType === 'delivery' ? `<div class="mo-order-meta">📍 ${o.deliveryAddress || '—'}</div>` : ''}
           </div>
           <span class="mo-status status-${status}">${statusLabel(status)}</span>
         </div>

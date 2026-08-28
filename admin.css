@@ -255,12 +255,37 @@
     .product-admin-card{margin-bottom:0;}
   }
 
-  /* ---------- Print (order slips — orders.html) ---------- */
+  /* ---------- Print (thermal receipt slips — orders.html) ---------- */
+  .sidebar-print-setting{padding:12px;border-top:1px solid var(--border);}
+  .sidebar-print-setting label{display:block;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px;}
+  .sidebar-print-setting select{
+    width:100%;padding:9px 8px;border-radius:8px;border:1.5px solid var(--border);
+    background:var(--bg);color:var(--text);font-size:13px;
+  }
+
   #print-area{display:none;}
+  .receipt-center{text-align:center;}
+  .receipt-title{font-weight:800;letter-spacing:1px;margin-bottom:4px;}
+  .receipt-order-number{font-size:1.35em;font-weight:800;margin:2px 0;}
+  .receipt-dash{border-top:1px dashed #000;margin:8px 0;}
+  .receipt-item{margin-bottom:4px;}
+  .receipt-row{display:flex;justify-content:space-between;gap:8px;}
+  .receipt-note{font-size:0.85em;padding-left:10px;}
+  .receipt-fulfillment-label{font-weight:800;font-size:1.15em;text-align:center;letter-spacing:.5px;margin-bottom:6px;}
+  .receipt-detail{font-size:1.15em;font-weight:700;}
+  .receipt-address{font-size:1.05em;margin-top:6px;line-height:1.4;}
+  .receipt-grand-total{font-weight:800;font-size:1.15em;}
+  .receipt-footer{margin-top:10px;font-size:0.85em;}
+
   @media print{
     body *{visibility:hidden;}
     #print-area, #print-area *{visibility:visible;}
-    #print-area{display:block;position:absolute;top:0;left:0;width:100%;padding:20px;}
-    #print-area hr{border:none;border-top:1px solid #000;margin:10px 0;}
-    #print-area table{font-size:13px;}
+    #print-area{
+      display:block;position:absolute;top:0;left:0;
+      padding:6px 8px;
+      font-family:Consolas,'Lucida Console','DejaVu Sans Mono','Roboto Mono',monospace;
+      font-size:13px;line-height:1.5;color:#000;
+    }
+    #print-area.receipt-58mm{width:58mm;}
+    #print-area.receipt-80mm{width:80mm;}
   }

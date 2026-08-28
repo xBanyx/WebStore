@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>RHJ WebStore</title>
+<title>My Restaurant</title>
 <link rel="stylesheet" href="restaurant-webstore.css">
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
@@ -15,6 +15,18 @@
   <img id="loading-logo" alt="">
   <div class="loading-spinner"></div>
   <div class="loading-text">Loading menu…</div>
+</div>
+
+<!-- Shown once, before the menu, if Google sign-in is available and the
+     visitor hasn't already signed in or chosen "guest" before. -->
+<div id="gate-screen" hidden>
+  <div class="gate-card">
+    <img id="gate-logo" alt="">
+    <h2 id="gate-name">Welcome</h2>
+    <p>Sign in with Google to track your orders later, or just browse as a guest — either way you can order right away.</p>
+    <button class="btn btn-primary btn-block" onclick="gateSignIn()">Sign in with Google</button>
+    <button class="btn btn-secondary btn-block" style="margin-top:10px;" onclick="chooseGuest()">Continue as Guest</button>
+  </div>
 </div>
 <div id="app">
 
@@ -82,13 +94,25 @@
         <input type="tel" id="input-phone" placeholder="09XXXXXXXXX">
         <div class="error-msg" id="phone-error">Contact Number is required.</div>
       </div>
+      <div class="field" id="field-fulfillment" hidden>
+        <label>How would you like to get your order? *</label>
+        <div class="fulfillment-toggle">
+          <button type="button" class="fulfillment-btn active" data-type="pickup" onclick="setFulfillmentType('pickup')">🏪 Pickup</button>
+          <button type="button" class="fulfillment-btn" data-type="delivery" onclick="setFulfillmentType('delivery')">🛵 Delivery</button>
+        </div>
+      </div>
+      <div class="field" id="field-delivery-address" hidden>
+        <label>Delivery Address *</label>
+        <textarea id="input-delivery-address" rows="2" placeholder="House/unit no., street, barangay, landmark"></textarea>
+        <div class="error-msg">Delivery address is required.</div>
+      </div>
       <div class="field" id="field-pickup-date">
-        <label>Pickup Date *</label>
+        <label id="label-pickup-date">Pickup Date *</label>
         <input type="date" id="input-pickup-date">
         <div class="error-msg">Please select a pickup date.</div>
       </div>
       <div class="field" id="field-pickup-time">
-        <label>Pickup Time *</label>
+        <label id="label-pickup-time">Pickup Time *</label>
         <input type="time" id="input-pickup-time">
         <div class="error-msg">Please select a pickup time.</div>
       </div>
@@ -142,7 +166,7 @@
    CONFIGURATION — edit these to reconfigure the whole store
    ======================================================== */
 const DEFAULT_RESTAURANT_CONFIG = {
-  name: "RHJ WebStore",
+  name: "My Restaurant",
   logo: "https://picsum.photos/seed/resto-logo/100/100",
   // Multiple banners now supported — the storefront auto-scrolls through
   // whichever images are in this array. "banner" (singular) is kept as a
@@ -191,6 +215,7 @@ const MESSENGER_CONFIG = (() => {
 const PRODUCTS_STORAGE_KEY = "myresto_products_v1";
 const CONFIG_STORAGE_KEY   = "myresto_config_v1";
 const ORDERS_STORAGE_KEY   = "myresto_orders_v1"; // must match orders.html exactly
+const GUEST_CHOICE_KEY     = "myresto_guest_choice_v1"; // remembers "Continue as Guest" so the gate doesn't nag on every visit
 
 /* ========================================================
    CLOUD SYNC (Firebase) — see firebase-config.js.
@@ -204,7 +229,16 @@ const FIREBASE_ENABLED = typeof FIREBASE_CONFIG !== 'undefined' &&
 let db = null;
 let auth = null;
 let currentUser = null; // the signed-in customer, if any — optional, guest checkout still works
+
+// The loading screen (and the sign-in gate right after it) waits on two
+// independent things: the menu data, and — if Firebase is configured —
+// knowing whether the visitor is already signed in. Both run in parallel;
+// we only move on once whichever ones apply have both finished.
+let authReady = true;
+let dataReady = false;
+
 if(FIREBASE_ENABLED){
+  authReady = false;
   firebase.initializeApp(FIREBASE_CONFIG);
   db = firebase.firestore();
   auth = firebase.auth();
@@ -212,9 +246,43 @@ if(FIREBASE_ENABLED){
   auth.onAuthStateChanged(user=>{
     currentUser = user;
     updateSignInUI();
+    if(user) document.getElementById('gate-screen').hidden = true; // signing in from the gate itself closes it
+    authReady = true;
+    tryFinishBoot();
   });
 }
 function storeDoc(){ return db.collection('stores').doc('main'); }
+
+function dataFinishedLoading(){
+  dataReady = true;
+  tryFinishBoot();
+}
+function tryFinishBoot(){
+  if(!dataReady || !authReady) return;
+  hideLoadingScreen();
+  maybeShowGate();
+}
+
+/* ======================= SIGN-IN GATE =======================
+   A one-time prompt shown before the menu — sign in to track orders
+   later, or continue as a guest. Only shown when Google sign-in is
+   actually available, nobody's already signed in, and the visitor
+   hasn't already picked "guest" on a previous visit. */
+function maybeShowGate(){
+  if(!FIREBASE_ENABLED || currentUser) return;
+  try{ if(localStorage.getItem(GUEST_CHOICE_KEY)) return; }catch(e){}
+  const logo = document.getElementById('gate-logo');
+  if(RESTAURANT_CONFIG.logo){ logo.src = RESTAURANT_CONFIG.logo; logo.classList.add('show'); }
+  document.getElementById('gate-name').textContent = RESTAURANT_CONFIG.name || 'Welcome';
+  document.getElementById('gate-screen').hidden = false;
+}
+function chooseGuest(){
+  try{ localStorage.setItem(GUEST_CHOICE_KEY, '1'); }catch(e){}
+  document.getElementById('gate-screen').hidden = true;
+}
+function gateSignIn(){
+  signInWithGoogle(); // gate closes itself via onAuthStateChanged above once sign-in succeeds
+}
 
 /* ======================= CUSTOMER GOOGLE SIGN-IN (optional) ======================= */
 function signInWithGoogle(){
@@ -330,6 +398,19 @@ let RESTAURANT_CONFIG = loadConfig();
 let cart = [];
 let lastOrder = null;
 let cartIdSeq = 1;
+let fulfillmentType = 'pickup'; // 'pickup' or 'delivery' — only relevant when DELIVERY_CONFIG.enabled
+
+function setFulfillmentType(type){
+  fulfillmentType = type;
+  document.querySelectorAll('.fulfillment-btn').forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.type === type);
+  });
+  const isDelivery = type === 'delivery';
+  document.getElementById('field-delivery-address').hidden = !isDelivery;
+  document.getElementById('label-pickup-date').textContent = isDelivery ? 'Delivery Date *' : 'Pickup Date *';
+  document.getElementById('label-pickup-time').textContent = isDelivery ? 'Delivery Time *' : 'Pickup Time *';
+  renderCheckout(); // delivery fee only applies for delivery — refresh totals
+}
 
 /* ======================= INIT ======================= */
 let bannerTimer = null;
@@ -430,9 +511,9 @@ function init(){
   if(FIREBASE_ENABLED){
     // Don't leave visitors staring at the loading screen forever if the
     // network is slow or Firestore never responds.
-    setTimeout(hideLoadingScreen, 4000);
+    setTimeout(()=>{ authReady = true; dataFinishedLoading(); }, 4000);
     storeDoc().onSnapshot(snap=>{
-      if(!snap.exists){ hideLoadingScreen(); return; }
+      if(!snap.exists){ dataFinishedLoading(); return; }
       const data = snap.data();
       let changed = false;
       if(Array.isArray(data.products) && data.products.length){ PRODUCTS = data.products; changed = true; }
@@ -445,11 +526,11 @@ function init(){
         applyConfig();
         renderMenu();
       }
-      hideLoadingScreen();
-    }, err=>{ console.error('Store sync error:', err); hideLoadingScreen(); });
+      dataFinishedLoading();
+    }, err=>{ console.error('Store sync error:', err); dataFinishedLoading(); });
   } else {
     // No cloud configured — local/default data is already rendered above.
-    hideLoadingScreen();
+    dataFinishedLoading();
   }
 
   // Gives the sticky topbar a shadow once the page is scrolled, so it
@@ -646,7 +727,7 @@ function updateCartCount(animate){
 }
 function cartTotals(){
   const subtotal = cart.reduce((a,l)=>a + l.unitPrice*l.qty, 0);
-  const delivery = (DELIVERY_CONFIG.enabled && subtotal>0) ? DELIVERY_CONFIG.fee : 0;
+  const delivery = (DELIVERY_CONFIG.enabled && fulfillmentType === 'delivery' && subtotal>0) ? DELIVERY_CONFIG.fee : 0;
   const discount = DISCOUNT_CONFIG.enabled ? DISCOUNT_CONFIG.amount : 0;
   const total = Math.max(0, subtotal + delivery - discount);
   return { subtotal, delivery, discount, total };
@@ -690,7 +771,7 @@ function renderCart(){
 
   let summaryHtml = `<div class="summary-box">
     <div class="summary-row"><span>Subtotal</span><span>${money(t.subtotal)}</span></div>`;
-  if(DELIVERY_CONFIG.enabled){
+  if(DELIVERY_CONFIG.enabled && fulfillmentType === 'delivery'){
     summaryHtml += `<div class="summary-row"><span>Delivery Fee</span><span>${money(t.delivery)}</span></div>`;
   }
   if(DISCOUNT_CONFIG.enabled && t.discount>0){
@@ -703,6 +784,9 @@ function renderCart(){
 
 /* ======================= CHECKOUT ======================= */
 function renderCheckout(){
+  document.getElementById('field-fulfillment').hidden = !DELIVERY_CONFIG.enabled;
+  if(!DELIVERY_CONFIG.enabled) fulfillmentType = 'pickup'; // no choice to make — pickup only, as before
+
   const lines = document.getElementById('checkout-lines');
   lines.innerHTML = cart.map(line=>`
     <div class="order-line">
@@ -716,7 +800,7 @@ function renderCheckout(){
 
   const t = cartTotals();
   let totalsHtml = `<div class="summary-row"><span>Subtotal</span><span>${money(t.subtotal)}</span></div>`;
-  if(DELIVERY_CONFIG.enabled){
+  if(DELIVERY_CONFIG.enabled && fulfillmentType === 'delivery'){
     totalsHtml += `<div class="summary-row"><span>Delivery Fee</span><span>${money(t.delivery)}</span></div>`;
   }
   if(DISCOUNT_CONFIG.enabled && t.discount>0){
@@ -799,12 +883,14 @@ function placeOrder(){
   const phone = document.getElementById('input-phone').value.trim();
   const pickupDate = document.getElementById('input-pickup-date').value;
   const pickupTime = document.getElementById('input-pickup-time').value;
+  const deliveryAddress = document.getElementById('input-delivery-address').value.trim();
 
   let valid = true;
   const nameField = document.getElementById('field-name');
   const phoneField = document.getElementById('field-phone');
   const pickupDateField = document.getElementById('field-pickup-date');
   const pickupTimeField = document.getElementById('field-pickup-time');
+  const deliveryAddressField = document.getElementById('field-delivery-address');
   const phoneErr = document.getElementById('phone-error');
 
   nameField.classList.toggle('invalid', name.length===0);
@@ -824,6 +910,14 @@ function placeOrder(){
 
   pickupTimeField.classList.toggle('invalid', pickupTime==='');
   if(pickupTime==='') valid=false;
+
+  const isDelivery = DELIVERY_CONFIG.enabled && fulfillmentType === 'delivery';
+  if(isDelivery){
+    deliveryAddressField.classList.toggle('invalid', deliveryAddress==='');
+    if(deliveryAddress==='') valid=false;
+  } else {
+    deliveryAddressField.classList.remove('invalid');
+  }
 
   if(!valid) return;
 
@@ -850,6 +944,7 @@ function placeOrder(){
       date: new Date(),
       customerName: name,
       contactNumber: phone,
+      fulfillmentType: isDelivery ? 'delivery' : 'pickup',
       pickupDate: formatDateLong(pickupDate),
       pickupTime: formatTime12(pickupTime),
       items,
@@ -859,6 +954,10 @@ function placeOrder(){
       total: t.total,
       status: "pending"
     };
+
+    if(isDelivery){
+      lastOrder.deliveryAddress = deliveryAddress;
+    }
 
     if(currentUser){
       lastOrder.customerUid = currentUser.uid;
@@ -936,7 +1035,7 @@ function renderSuccess(order){
   });
 
   let totalsHtml = `<div><span>Subtotal</span><span>${money(order.subtotal)}</span></div>`;
-  if(DELIVERY_CONFIG.enabled){
+  if(DELIVERY_CONFIG.enabled && order.fulfillmentType === 'delivery'){
     totalsHtml += `<div><span>Delivery Fee</span><span>${money(order.delivery)}</span></div>`;
   }
   if(DISCOUNT_CONFIG.enabled && order.discount>0){
@@ -961,8 +1060,9 @@ function renderSuccess(order){
       <div class="r-block-title">Customer</div>
       <div class="r-cust-name">${order.customerName}</div>
       <div class="r-cust-contact">${order.contactNumber}</div>
-      <div class="r-block-title">Pickup</div>
+      <div class="r-block-title">${order.fulfillmentType === 'delivery' ? 'Delivery' : 'Pickup'}</div>
       <div class="r-pickup">${order.pickupDate} · ${order.pickupTime}</div>
+      ${order.fulfillmentType === 'delivery' ? `<div class="r-cust-contact">${order.deliveryAddress}</div>` : ''}
       <div class="r-divider"></div>
       <div class="r-block-title">Order</div>
       ${itemsHtml}
@@ -1022,6 +1122,8 @@ function closeSendReceiptPopup(){
 function resetToMenu(){
   lastOrder = null;
   document.getElementById('receipt-mount').innerHTML = '';
+  document.getElementById('input-delivery-address').value = '';
+  setFulfillmentType('pickup');
   showView('menu');
 }
 
