@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Store Admin — My Restaurant</title>
 <link rel="stylesheet" href="admin.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
@@ -39,7 +40,7 @@
       <div class="login-error" id="login-error-legacy">Incorrect password.</div>
       <button class="btn btn-primary btn-block" onclick="attemptLegacyLogin()">Log In</button>
       <div class="login-note" style="color:#b23b3b;">
-        ⚠ Firebase isn't configured, so this page is using a weak, insecure
+        <i class="fa-solid fa-triangle-exclamation"></i> Firebase isn't configured, so this page is using a weak, insecure
         client-side password (visible to anyone who reads the page source).
         Fill in firebase-config.js and set up Firebase Authentication for
         real login security.
@@ -52,7 +53,7 @@
 <div id="app" hidden>
 
   <div class="topbar">
-    <button class="menu-toggle" onclick="openSidebar()" aria-label="Open menu">☰</button>
+    <button class="menu-toggle" onclick="openSidebar()" aria-label="Open menu"><i class="fa-solid fa-bars"></i></button>
     <h1>Store Admin</h1>
     <span class="sync-badge" id="sync-badge">Checking sync…</span>
   </div>
@@ -64,10 +65,10 @@
       <button class="sidebar-close" onclick="closeSidebar()" aria-label="Close menu">×</button>
     </div>
     <div class="sidebar-links">
-      <span class="sidebar-link current">📋 Menu Admin</span>
-      <a class="sidebar-link" href="orders.html">🧾 Orders</a>
-      <a class="sidebar-link" href="index.html" target="_blank">🔗 View Store</a>
-      <button class="sidebar-link" id="account-btn" onclick="openAccountModal()" hidden>👤 Account</button>
+      <span class="sidebar-link current"><i class="fa-solid fa-clipboard-list"></i> Menu Admin</span>
+      <a class="sidebar-link" href="orders.html"><i class="fa-solid fa-receipt"></i> Orders</a>
+      <a class="sidebar-link" href="index.html" target="_blank"><i class="fa-solid fa-arrow-up-right-from-square"></i> View Store</a>
+      <button class="sidebar-link" id="account-btn" onclick="openAccountModal()" hidden><i class="fa-solid fa-user"></i> Account</button>
     </div>
     <div class="sidebar-footer">
       <button class="sidebar-link logout" onclick="logOut()">Log Out</button>
@@ -80,6 +81,14 @@
       <div class="field">
         <label>Restaurant Name</label>
         <input type="text" id="cfg-name-input">
+      </div>
+      <div class="field">
+        <label>Store Address <span style="font-weight:400;color:var(--muted,#8a8078);">(printed on receipts)</span></label>
+        <textarea id="cfg-address-input" rows="2"></textarea>
+      </div>
+      <div class="field">
+        <label>Menu Link <span style="font-weight:400;color:var(--muted,#8a8078);">(QR code on receipts — leave blank to auto-link to this site's menu)</span></label>
+        <input type="text" id="cfg-menu-url-input" placeholder="https://yoursite.com">
       </div>
       <div class="field">
         <label>Logo</label>
@@ -100,6 +109,46 @@
         </label>
       </div>
       <button class="btn btn-primary btn-block" onclick="saveConfig()">Save Store Info</button>
+    </div>
+  </div>
+
+  <!-- DELIVERY SETTINGS -->
+  <div class="section">
+    <div class="section-title">Delivery Settings</div>
+    <div class="card">
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:600;">
+          <input type="checkbox" id="cfg-delivery-enabled" style="width:auto;">
+          Offer delivery
+        </label>
+      </div>
+      <div class="field">
+        <label>Shop Location <span style="font-weight:400;color:var(--muted,#8a8078);">(used to measure delivery distance)</span></label>
+        <p class="field-hint">Stand at your shop and tap "Use my current location", or paste coordinates from Google Maps (right-click your spot on the map → click the lat/lng that appears).</p>
+        <div class="add-image-row">
+          <input type="number" id="cfg-shop-lat" placeholder="Latitude" step="any" style="flex:1;">
+          <input type="number" id="cfg-shop-lng" placeholder="Longitude" step="any" style="flex:1;">
+        </div>
+        <button type="button" class="btn btn-secondary btn-block" style="margin-top:8px;" onclick="useShopCurrentLocation()"><i class="fa-solid fa-location-crosshairs"></i> Use my current location</button>
+        <p class="field-hint" id="cfg-shop-location-status"></p>
+      </div>
+      <div class="field">
+        <label>Base Fee <span style="font-weight:400;color:var(--muted,#8a8078);">(covers deliveries within the free radius)</span></label>
+        <input type="number" id="cfg-delivery-base" min="0" step="1">
+      </div>
+      <div class="field">
+        <label>Free Radius (km)</label>
+        <input type="number" id="cfg-delivery-free-radius" min="0" step="0.1">
+      </div>
+      <div class="field">
+        <label>Fee per km beyond that</label>
+        <input type="number" id="cfg-delivery-per-km" min="0" step="1">
+      </div>
+      <div class="field">
+        <label>Max Delivery Radius (km) <span style="font-weight:400;color:var(--muted,#8a8078);">(orders farther than this are turned away)</span></label>
+        <input type="number" id="cfg-delivery-max-radius" min="0" step="0.1">
+      </div>
+      <button class="btn btn-primary btn-block" onclick="saveDeliverySettings()">Save Delivery Settings</button>
     </div>
   </div>
 
@@ -234,10 +283,10 @@ function updateSyncBadge(){
   const el = document.getElementById('sync-badge');
   if(!el) return;
   if(FIREBASE_ENABLED){
-    el.textContent = "☁ Cloud sync on";
+    el.innerHTML = '<i class="fa-solid fa-cloud"></i> Cloud sync on';
     el.classList.add('on'); el.classList.remove('off');
   } else {
-    el.textContent = "⚠ Local only";
+    el.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Local only';
     el.classList.add('off'); el.classList.remove('on');
     el.title = "Changes only show on this device/browser. Fill in firebase-config.js to sync for all visitors.";
   }
@@ -295,7 +344,8 @@ async function processUpload(file, folder, opts){
 }
 
 const DEFAULT_RESTAURANT_CONFIG = {
-  name: "My Restaurant",
+  name: "RHJ Diner",
+  address: "Capalonga, Camarines Norte, Purok 2, Brgy. Poblacion, Custodio Street",
   logo: "https://picsum.photos/seed/resto-logo/100/100",
   banners: [
     "https://picsum.photos/seed/resto-banner/800/300",
@@ -303,7 +353,16 @@ const DEFAULT_RESTAURANT_CONFIG = {
     "https://picsum.photos/seed/resto-banner-3/800/300"
   ],
   banner: "https://picsum.photos/seed/resto-banner/800/300",
-  blackoutDates: []
+  blackoutDates: [],
+  delivery: {
+    enabled: true,
+    shopLat: null,
+    shopLng: null,
+    baseFee: 40,
+    freeRadiusKm: 2,
+    perKmFee: 15,
+    maxRadiusKm: 15
+  }
 };
 
 // Kept identical to the storefront's built-in defaults so "Reset to Defaults" matches.
@@ -581,6 +640,7 @@ function normalizeConfig(cfg){
   if((!Array.isArray(cfg.banners) || !cfg.banners.length) && cfg.banner){
     cfg = { ...cfg, banners: [cfg.banner] };
   }
+  cfg = { ...cfg, delivery: { ...DEFAULT_RESTAURANT_CONFIG.delivery, ...(cfg.delivery || {}) } };
   return cfg;
 }
 function persistProducts(){
@@ -594,9 +654,60 @@ function persistConfig(){
 
 function renderConfigUI(){
   document.getElementById('cfg-name-input').value = config.name;
+  document.getElementById('cfg-address-input').value = config.address || '';
+  document.getElementById('cfg-menu-url-input').value = config.menuUrl || '';
   document.getElementById('cfg-logo-preview').src = config.logo;
   renderBannersUI();
   renderBlackoutUI();
+  renderDeliveryUI();
+}
+function renderDeliveryUI(){
+  const d = config.delivery || DEFAULT_RESTAURANT_CONFIG.delivery;
+  document.getElementById('cfg-delivery-enabled').checked = !!d.enabled;
+  document.getElementById('cfg-shop-lat').value = d.shopLat ?? '';
+  document.getElementById('cfg-shop-lng').value = d.shopLng ?? '';
+  document.getElementById('cfg-delivery-base').value = d.baseFee;
+  document.getElementById('cfg-delivery-free-radius').value = d.freeRadiusKm;
+  document.getElementById('cfg-delivery-per-km').value = d.perKmFee;
+  document.getElementById('cfg-delivery-max-radius').value = d.maxRadiusKm;
+  const status = document.getElementById('cfg-shop-location-status');
+  status.textContent = (d.shopLat != null && d.shopLng != null)
+    ? `Pin set: ${Number(d.shopLat).toFixed(5)}, ${Number(d.shopLng).toFixed(5)}`
+    : 'No pin set yet — delivery fees can\'t be calculated until you set one.';
+}
+function useShopCurrentLocation(){
+  if(!navigator.geolocation){ showToast("This browser can't get your location"); return; }
+  const status = document.getElementById('cfg-shop-location-status');
+  status.textContent = 'Getting your location…';
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      document.getElementById('cfg-shop-lat').value = pos.coords.latitude;
+      document.getElementById('cfg-shop-lng').value = pos.coords.longitude;
+      status.textContent = 'Location captured — remember to Save Delivery Settings.';
+    },
+    err => { status.textContent = "Couldn't get your location — check location permission for this site."; },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+function saveDeliverySettings(){
+  const lat = document.getElementById('cfg-shop-lat').value;
+  const lng = document.getElementById('cfg-shop-lng').value;
+  config.delivery = {
+    enabled: document.getElementById('cfg-delivery-enabled').checked,
+    shopLat: lat === '' ? null : Number(lat),
+    shopLng: lng === '' ? null : Number(lng),
+    baseFee: Math.max(0, Number(document.getElementById('cfg-delivery-base').value) || 0),
+    freeRadiusKm: Math.max(0, Number(document.getElementById('cfg-delivery-free-radius').value) || 0),
+    perKmFee: Math.max(0, Number(document.getElementById('cfg-delivery-per-km').value) || 0),
+    maxRadiusKm: Math.max(0, Number(document.getElementById('cfg-delivery-max-radius').value) || 0)
+  };
+  if(config.delivery.enabled && (config.delivery.shopLat == null || config.delivery.shopLng == null)){
+    showToast("Set your shop's location first so distance fees can be calculated");
+    return;
+  }
+  persistConfig();
+  renderDeliveryUI();
+  showToast("Delivery settings saved");
 }
 function renderBlackoutUI(){
   const list = document.getElementById('cfg-blackout-list');
@@ -671,6 +782,8 @@ async function boot(){
 
 function saveConfig(){
   config.name = document.getElementById('cfg-name-input').value.trim() || DEFAULT_RESTAURANT_CONFIG.name;
+  config.address = document.getElementById('cfg-address-input').value.trim();
+  config.menuUrl = document.getElementById('cfg-menu-url-input').value.trim();
   config.logo = config.logo || DEFAULT_RESTAURANT_CONFIG.logo;
   if(!config.banners || !config.banners.length) config.banners = [...DEFAULT_RESTAURANT_CONFIG.banners];
   config.banner = config.banners[0]; // kept in sync for anything still reading the old single-banner field
@@ -758,7 +871,7 @@ function productFormHtml(p){
   const imagesHtml = (p.images||[]).map((img,i)=>`
     <div class="image-thumb">
       <img src="${img}">
-      <button onclick="removeImage('${p.id}',${i})">✕</button>
+      <button onclick="removeImage('${p.id}',${i})"><i class="fa-solid fa-xmark"></i></button>
     </div>
   `).join('');
 
@@ -766,7 +879,7 @@ function productFormHtml(p){
     <div class="size-row">
       <input type="text" placeholder="Size name" value="${escapeAttr(s.name)}" onchange="updateSize('${p.id}',${i},'name',this.value)">
       <input type="number" placeholder="Price" value="${s.price}" min="0" onchange="updateSize('${p.id}',${i},'price',this.value)">
-      <button onclick="removeSize('${p.id}',${i})">✕</button>
+      <button onclick="removeSize('${p.id}',${i})"><i class="fa-solid fa-xmark"></i></button>
     </div>
   `).join('');
 

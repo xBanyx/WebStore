@@ -160,6 +160,15 @@
   .blackout-item .banner-remove{position:static;flex-shrink:0;}
 
   /* ---------- Orders page ---------- */
+  .order-search-row{position:relative;margin-bottom:12px;}
+  .order-search-row input{
+    width:100%;padding:10px 14px 10px 36px;border-radius:10px;
+    border:1.5px solid var(--border);background:var(--card);color:var(--text);font-size:14px;
+  }
+  .order-search-row i{
+    position:absolute;left:13px;top:50%;transform:translateY(-50%);
+    color:var(--muted);font-size:13px;pointer-events:none;
+  }
   .filter-tabs{display:flex;gap:8px;margin-bottom:14px;}
   .filter-tab{
     flex:1;background:var(--card);border:1.5px solid var(--border);border-radius:9px;
@@ -209,6 +218,17 @@
   .modal-tab.active{background:var(--primary);border-color:var(--primary);color:#fff;}
   .order-card-body{padding:0 16px 16px;border-top:1px solid var(--border);}
   .order-detail-row{font-size:13px;padding:5px 0;}
+  .order-note-box{
+    background:#fff8e6;border:1px solid #f0d896;border-radius:9px;
+    padding:8px 10px;margin:8px 0;font-size:13px;line-height:1.4;
+  }
+  .order-note-row{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
+  .order-note-text{flex:1;min-width:0;}
+  .order-note-actions{display:flex;gap:4px;flex-shrink:0;}
+  .icon-btn{
+    width:26px;height:26px;border-radius:7px;background:var(--bg);
+    color:var(--muted);font-size:12px;display:flex;align-items:center;justify-content:center;
+  }
   .order-line{font-size:13px;padding:6px 0;border-bottom:1px solid var(--border);}
   .order-line:last-child{border-bottom:none;}
   .order-line-top{display:flex;justify-content:space-between;}
@@ -265,6 +285,14 @@
 
   #print-area{display:none;}
   .receipt-center{text-align:center;}
+  .receipt-logo{
+    display:block;margin:0 auto 6px;object-fit:contain;
+    /* Adjust freely between 1in and 1.5in — this is the actual printed
+       size regardless of paper width, since it's set in physical units. */
+    width:1.25in;height:1.25in;
+  }
+  .receipt-store-name{font-weight:800;font-size:1.25em;letter-spacing:.5px;}
+  .receipt-store-address{font-size:0.95em;line-height:1.35;margin-top:2px;}
   .receipt-title{font-weight:800;letter-spacing:1px;margin-bottom:4px;}
   .receipt-order-number{font-size:1.35em;font-weight:800;margin:2px 0;}
   .receipt-dash{border-top:1px dashed #000;margin:8px 0;}
@@ -275,17 +303,29 @@
   .receipt-detail{font-size:1.15em;font-weight:700;}
   .receipt-address{font-size:1.05em;margin-top:6px;line-height:1.4;}
   .receipt-grand-total{font-weight:800;font-size:1.15em;}
-  .receipt-footer{margin-top:10px;font-size:0.85em;}
+  .receipt-qr{margin-top:10px;}
+  .receipt-qr-img{
+    display:block;margin:0 auto;object-fit:contain;
+    /* Physical size regardless of paper width — big enough to scan reliably. */
+    width:1.25in;height:1.25in;
+  }
+  .receipt-qr-label{font-size:1em;margin-top:3px;}
+  .receipt-footer{margin-top:6px;font-size:1.25em;}
 
   @media print{
     body *{visibility:hidden;}
     #print-area, #print-area *{visibility:visible;}
     #print-area{
       display:block;position:absolute;top:0;left:0;
-      padding:6px 8px;
       font-family:Consolas,'Lucida Console','DejaVu Sans Mono','Roboto Mono',monospace;
-      font-size:13px;line-height:1.5;color:#000;
+      color:#000;
     }
-    #print-area.receipt-58mm{width:58mm;}
-    #print-area.receipt-80mm{width:80mm;}
+    /* 48mm: mini thermal printers (the common cheap Bluetooth/USB ones) —
+       tightest fit, ~26 characters/line at this size. */
+    #print-area.receipt-48mm{width:68mm;padding:3px 4px;font-size:16px;line-height:1.2;}
+    /* 58mm: ~32 characters/line at this size — the standard thermal-printer
+       fit. Tighter padding than 80mm to make the most of the narrow paper. */
+    #print-area.receipt-58mm{width:58mm;padding:4px 6px;font-size:15px;line-height:1.25;}
+    /* 80mm: roomier paper, so a bigger, more comfortable size still fits. */
+    #print-area.receipt-80mm{width:80mm;padding:6px 8px;font-size:17px;line-height:1.35;}
   }

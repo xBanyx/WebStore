@@ -169,6 +169,56 @@
     border-top:1px solid var(--border);padding:12px 16px calc(12px + env(safe-area-inset-bottom));
     display:flex;gap:10px;z-index:30;
   }
+
+  /* ---------- Bottom nav (menu view only) ---------- */
+  .bottom-nav{
+    position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+    width:100%;max-width:480px;background:var(--card);
+    border-top:1px solid var(--border);
+    padding:6px 8px calc(6px + env(safe-area-inset-bottom));
+    display:flex;z-index:30;
+  }
+  .bottom-nav-item{
+    flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
+    padding:8px 4px;border-radius:12px;background:none;
+    color:var(--muted);font-size:11px;font-weight:600;text-decoration:none;
+  }
+  .bottom-nav-item i{font-size:19px;}
+  .bottom-nav-item.active{color:var(--primary);}
+  .bottom-nav-avatar{display:inline-flex;font-size:19px;line-height:1;}
+  .bottom-nav-avatar img{width:22px;height:22px;border-radius:50%;object-fit:cover;display:block;}
+  .bottom-nav-icon-wrap{position:relative;display:inline-flex;}
+  .bottom-nav-badge{
+    position:absolute;top:-6px;right:-9px;min-width:16px;height:16px;
+    border-radius:999px;background:var(--primary);color:#fff;
+    font-size:10px;font-weight:800;line-height:1;
+    display:flex;align-items:center;justify-content:center;padding:0 4px;
+  }
+  .bottom-nav-badge.alert{background:#c0392b;}
+  .bottom-nav-badge.success{background:#2e8b57;}
+
+  /* ---------- Account view ---------- */
+  .account-card{
+    background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+    padding:28px 20px;margin:16px;text-align:center;
+  }
+  .account-avatar-icon{font-size:64px;color:var(--border);margin-bottom:10px;display:block;}
+  .account-avatar{width:76px;height:76px;border-radius:50%;object-fit:cover;margin:0 auto 12px;}
+  .account-card h3{margin:0 0 2px;font-size:17px;}
+  .account-card p{margin:0 0 18px;color:var(--muted);font-size:13.5px;}
+  .account-card .btn{margin-top:4px;width:100%;}
+
+  /* ---------- FAQ ---------- */
+  #faq-list{padding:12px 16px 24px;}
+  .faq-item{background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:10px;overflow:hidden;}
+  .faq-question{
+    width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:14px 16px;text-align:left;background:none;color:var(--text);font-size:14px;font-weight:700;
+  }
+  .faq-question i{color:var(--muted);font-size:13px;transition:transform .2s;flex-shrink:0;}
+  .faq-question i.open{transform:rotate(180deg);}
+  .faq-answer{padding:0 16px 16px;font-size:13.5px;color:var(--muted);line-height:1.5;}
+
   .btn{
     flex:1;padding:14px;border-radius:12px;font-weight:700;font-size:15px;text-align:center;
   }
@@ -195,6 +245,7 @@
   .field textarea{resize:vertical;}
   .field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--primary);}
   .error-msg{color:#b23b3b;font-size:12.5px;margin-top:5px;display:none;}
+  .field-hint{font-size:12px;color:var(--muted);margin:6px 0 0;line-height:1.4;}
   .field.invalid input,.field.invalid select,.field.invalid textarea{border-color:#b23b3b;}
   .field.invalid .error-msg{display:block;}
   .fulfillment-toggle{display:flex;gap:10px;}
@@ -280,6 +331,7 @@
   #receipt .r-logo{width:46px;height:46px;border-radius:50%;object-fit:cover;margin:0 auto 6px;}
   #receipt .r-center{text-align:center;}
   #receipt .r-name{font-weight:800;font-size:15px;letter-spacing:.03em;}
+  #receipt .r-address{font-size:10.5px;color:#8a8078;line-height:1.4;margin-top:2px;}
   #receipt .r-sub{font-size:11px;letter-spacing:.15em;color:#8a8078;margin:8px 0 10px;text-transform:uppercase;}
   #receipt .r-divider{border-top:1px dashed #c9beb2;margin:10px 0;}
   #receipt .r-meta div{display:flex;justify-content:space-between;font-size:11.5px;padding:2px 0;}

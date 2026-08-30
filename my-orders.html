@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>My Orders — My Restaurant</title>
 <link rel="stylesheet" href="restaurant-webstore.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
@@ -28,8 +29,13 @@
     background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);
     padding:16px;margin-bottom:12px;
   }
+  .mo-order-card.new{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary);}
   .mo-order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
   .mo-order-number{font-weight:800;font-size:14px;}
+  .mo-new-tag{
+    display:inline-block;margin-left:6px;background:var(--primary);color:#fff;
+    font-size:9px;font-weight:800;padding:2px 6px;border-radius:20px;vertical-align:middle;
+  }
   .mo-order-meta{font-size:12px;color:var(--muted);margin-top:2px;}
   .mo-status{font-size:11px;font-weight:800;padding:4px 10px;border-radius:20px;white-space:nowrap;}
   .mo-status.status-pending{background:#fff4e8;color:var(--primary-dark,#b8380c);}
@@ -41,6 +47,11 @@
   .mo-progress-step.done{background:#1e7a3d;}
   .mo-progress-step.cancelled{background:#b23b3b;}
   .mo-progress-label{font-size:11px;color:var(--muted);margin-top:6px;}
+  .mo-notes{margin-top:10px;display:flex;flex-direction:column;gap:6px;}
+  .mo-note{
+    background:#fff8e6;border:1px solid #f0d896;border-radius:9px;
+    padding:7px 10px;font-size:12.5px;line-height:1.4;color:var(--text);
+  }
   .mo-items{margin-top:12px;border-top:1px solid var(--border);padding-top:10px;}
   .mo-item-line{display:flex;justify-content:space-between;font-size:13px;padding:4px 0;}
   .mo-total-line{display:flex;justify-content:space-between;font-size:13.5px;font-weight:800;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);}
@@ -55,7 +66,7 @@
     <div class="brand">
       <span id="cfg-name">My Orders</span>
     </div>
-    <a class="back-btn" href="index.html" style="text-decoration:none;">←</a>
+    <a class="back-btn" href="index.html" style="text-decoration:none;"><i class="fa-solid fa-arrow-left"></i></a>
   </div>
 
   <!-- Shown when Firebase (and therefore Google sign-in) isn't set up at all. -->
@@ -90,7 +101,35 @@
 const FIREBASE_ENABLED = typeof FIREBASE_CONFIG !== 'undefined' &&
   !!FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('YOUR_');
 
-let db = null, auth = null, ordersUnsub = null;
+let db = null, auth = null, ordersUnsub = null, currentUid = null;
+const ORDERS_SEEN_KEY = 'myresto_orders_seen_v1'; // shared schema with index.html's nav badge
+
+function getSeenMap(uid){
+  try{
+    const all = JSON.parse(localStorage.getItem(ORDERS_SEEN_KEY) || '{}');
+    return all[uid] || {};
+  }catch(e){ return {}; }
+}
+function isOrderUnseen(seenMap, order){
+  const seen = seenMap[order.orderNumber];
+  const noteCount = (order.statusLog || []).length;
+  if(!seen) return true;
+  return seen.status !== order.status || seen.noteCount !== noteCount;
+}
+// Called when a customer taps a card — records its current state as "seen"
+// so it stops being highlighted here and stops contributing to the nav
+// badge on index.html.
+function markOrderSeen(orderNumber, status, noteCount){
+  if(!currentUid) return;
+  try{
+    const all = JSON.parse(localStorage.getItem(ORDERS_SEEN_KEY) || '{}');
+    if(!all[currentUid]) all[currentUid] = {};
+    all[currentUid][orderNumber] = { status, noteCount };
+    localStorage.setItem(ORDERS_SEEN_KEY, JSON.stringify(all));
+  }catch(e){}
+  const card = document.getElementById('mo-card-' + orderNumber);
+  if(card) card.classList.remove('new');
+}
 
 if(FIREBASE_ENABLED){
   firebase.initializeApp(FIREBASE_CONFIG);
@@ -106,6 +145,7 @@ if(FIREBASE_ENABLED){
       document.getElementById('mo-signed-in').hidden = false;
       document.getElementById('mo-user-name').textContent = user.displayName || user.email;
       subscribeToMyOrders(user.uid);
+      currentUid = user.uid;
     } else {
       document.getElementById('mo-signed-out').hidden = false;
       document.getElementById('mo-signed-in').hidden = true;
@@ -151,6 +191,7 @@ function statusLabel(s){
   if(s === 'approved') return 'Approved';
   if(s === 'completed') return 'Completed';
   if(s === 'cancelled') return 'Cancelled';
+  if(s === 'note') return 'Note';
   return 'Pending';
 }
 
@@ -160,8 +201,11 @@ function renderOrders(orders){
     list.innerHTML = `<p class="mo-empty">No orders yet — anything you order while signed in will show up here.</p>`;
     return;
   }
+  const seenMap = getSeenMap(currentUid);
   list.innerHTML = orders.map(o => {
     const status = o.status || 'pending';
+    const noteCount = (o.statusLog || []).length;
+    const isNew = isOrderUnseen(seenMap, o);
     const orderedOn = o.dateISO ? new Date(o.dateISO).toLocaleString('en-PH', {
       month:'short', day:'numeric', hour:'numeric', minute:'2-digit'
     }) : '';
@@ -183,12 +227,12 @@ function renderOrders(orders){
       : 'Waiting for the store to approve this order';
 
     return `
-      <div class="mo-order-card">
+      <div class="mo-order-card${isNew ? ' new' : ''}" id="mo-card-${o.orderNumber}" onclick="markOrderSeen('${o.orderNumber}', '${status}', ${noteCount})">
         <div class="mo-order-head">
           <div>
-            <div class="mo-order-number">${o.orderNumber}</div>
-            <div class="mo-order-meta">Ordered ${orderedOn} · ${o.fulfillmentType === 'delivery' ? '🛵 Delivery' : '🏪 Pickup'} ${o.pickupDate} · ${o.pickupTime}</div>
-            ${o.fulfillmentType === 'delivery' ? `<div class="mo-order-meta">📍 ${o.deliveryAddress || '—'}</div>` : ''}
+            <div class="mo-order-number">${o.orderNumber}${isNew ? '<span class="mo-new-tag">NEW</span>' : ''}</div>
+            <div class="mo-order-meta">Ordered ${orderedOn} · ${o.fulfillmentType === 'delivery' ? '<i class="fa-solid fa-motorcycle"></i> Delivery' : '<i class="fa-solid fa-store"></i> Pickup'} ${o.pickupDate} · ${o.pickupTime}</div>
+            ${o.fulfillmentType === 'delivery' ? `<div class="mo-order-meta"><i class="fa-solid fa-location-dot"></i> ${o.deliveryAddress || '—'}</div>` : ''}
           </div>
           <span class="mo-status status-${status}">${statusLabel(status)}</span>
         </div>
@@ -198,6 +242,15 @@ function renderOrders(orders){
           <div class="mo-progress-step ${step3}"></div>
         </div>
         <div class="mo-progress-label">${progressLabel}</div>
+        ${Array.isArray(o.statusLog) && o.statusLog.length ? `
+          <div class="mo-notes">
+            ${o.statusLog.map(entry => `
+              <div class="mo-note">
+                <strong>${statusLabel(entry.status)}:</strong> ${entry.message}
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
         <div class="mo-items">${itemsHtml}</div>
         <div class="mo-total-line"><span>Total</span><span>${money(o.total)}</span></div>
       </div>

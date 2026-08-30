@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>RHJ WebStore</title>
 <link rel="stylesheet" href="restaurant-webstore.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
@@ -35,13 +36,31 @@
       <img id="cfg-logo" alt="logo">
       <span id="cfg-name"></span>
     </div>
-    <div style="display:flex;align-items:center;gap:10px;">
-      <a href="my-orders.html" style="font-size:12px;font-weight:700;color:var(--primary-dark);text-decoration:none;">My Orders</a>
-      <button class="cart-btn" onclick="showView('cart')">
-        🛒 Cart <span class="cart-badge" id="cart-count">0</span>
-      </button>
-    </div>
+    <button class="cart-btn" onclick="showView('cart')">
+      <i class="fa-solid fa-cart-shopping"></i> Cart <span class="cart-badge" id="cart-count">0</span>
+    </button>
   </div>
+
+  <!-- BOTTOM NAV — menu view only, per how the storefront is laid out -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <button class="bottom-nav-item active" data-tab="menu" onclick="showView('menu')">
+      <i class="fa-solid fa-utensils"></i><span>Menu</span>
+    </button>
+    <a class="bottom-nav-item" href="my-orders.html">
+      <span class="bottom-nav-icon-wrap">
+        <i class="fa-solid fa-receipt"></i>
+        <span class="bottom-nav-badge" id="my-orders-badge" hidden></span>
+      </span>
+      <span>My Orders</span>
+    </a>
+    <button class="bottom-nav-item" data-tab="faq" onclick="showView('faq')">
+      <i class="fa-solid fa-circle-question"></i><span>FAQ</span>
+    </button>
+    <button class="bottom-nav-item" data-tab="account" onclick="showView('account')">
+      <span class="bottom-nav-avatar" id="bottom-nav-avatar"><i class="fa-solid fa-circle-user"></i></span>
+      <span>Account</span>
+    </button>
+  </nav>
 
   <!-- MENU VIEW -->
   <main id="menu-view">
@@ -55,7 +74,7 @@
   <!-- CART VIEW -->
   <main id="cart-view" hidden>
     <div class="page-header">
-      <button class="back-btn" onclick="showView('menu')">←</button>
+      <button class="back-btn" onclick="showView('menu')"><i class="fa-solid fa-arrow-left"></i></button>
       <h2>Your Cart</h2>
     </div>
     <div id="cart-content"></div>
@@ -64,7 +83,7 @@
   <!-- CHECKOUT VIEW -->
   <main id="checkout-view" hidden>
     <div class="page-header">
-      <button class="back-btn" onclick="showView('cart')">←</button>
+      <button class="back-btn" onclick="showView('cart')"><i class="fa-solid fa-arrow-left"></i></button>
       <h2>Checkout</h2>
     </div>
     <div class="form-section">
@@ -97,14 +116,19 @@
       <div class="field" id="field-fulfillment" hidden>
         <label>How would you like to get your order? *</label>
         <div class="fulfillment-toggle">
-          <button type="button" class="fulfillment-btn active" data-type="pickup" onclick="setFulfillmentType('pickup')">🏪 Pickup</button>
-          <button type="button" class="fulfillment-btn" data-type="delivery" onclick="setFulfillmentType('delivery')">🛵 Delivery</button>
+          <button type="button" class="fulfillment-btn active" data-type="pickup" onclick="setFulfillmentType('pickup')"><i class="fa-solid fa-store"></i> Pickup</button>
+          <button type="button" class="fulfillment-btn" data-type="delivery" onclick="setFulfillmentType('delivery')"><i class="fa-solid fa-motorcycle"></i> Delivery</button>
         </div>
       </div>
       <div class="field" id="field-delivery-address" hidden>
         <label>Delivery Address *</label>
-        <textarea id="input-delivery-address" rows="2" placeholder="House/unit no., street, barangay, landmark"></textarea>
+        <textarea id="input-delivery-address" rows="2" placeholder="House/unit no., street, barangay, landmark" oninput="onDeliveryAddressEdited()"></textarea>
         <div class="error-msg">Delivery address is required.</div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button type="button" class="btn btn-secondary" style="flex:1;" onclick="calculateDeliveryFeeFromAddress()"><i class="fa-solid fa-ruler"></i> Calculate Delivery Fee</button>
+          <button type="button" class="btn btn-secondary" style="flex:1;" onclick="calculateDeliveryFeeFromGPS()"><i class="fa-solid fa-location-crosshairs"></i> Use My Location</button>
+        </div>
+        <p id="delivery-fee-status" class="field-hint"></p>
       </div>
       <div class="field" id="field-pickup-date">
         <label id="label-pickup-date">Pickup Date *</label>
@@ -116,6 +140,10 @@
         <input type="time" id="input-pickup-time">
         <div class="error-msg">Please select a pickup time.</div>
       </div>
+      <div class="field">
+        <label>Additional Notes <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+        <textarea id="input-order-notes" rows="2" placeholder="Anything else the store should know about this order"></textarea>
+      </div>
 
       <div class="section-title">Order Summary</div>
       <div id="checkout-lines"></div>
@@ -126,7 +154,7 @@
   <!-- SUCCESS / RECEIPT VIEW -->
   <main id="success-view" hidden>
     <div class="success-header">
-      <div class="success-check">✓</div>
+      <div class="success-check"><i class="fa-solid fa-check"></i></div>
       <h2>PLEASE SAVE THIS RECEIPT AND SEND IT TO THE STORE</h2>
       <p id="success-sub"></p>
     </div>
@@ -138,9 +166,40 @@
     </div>
 
     <div class="success-actions">
-      <button class="btn btn-primary" onclick="downloadReceipt()">⬇ Save / Download Receipt</button>
+      <button class="btn btn-primary" onclick="downloadReceipt()"><i class="fa-solid fa-download"></i> Save / Download Receipt</button>
       <button class="btn btn-secondary" onclick="resetToMenu()">Back to Menu</button>
     </div>
+  </main>
+
+  <!-- ACCOUNT VIEW — reached from the bottom nav. Kept minimal: avatar,
+       name, sign in/out. Mirrors the sign-in state also shown at checkout. -->
+  <main id="account-view" hidden>
+    <div class="page-header">
+      <button class="back-btn" onclick="showView('menu')"><i class="fa-solid fa-arrow-left"></i></button>
+      <h2>Account</h2>
+    </div>
+    <div class="account-card" id="account-card-out">
+      <i class="fa-solid fa-circle-user account-avatar-icon"></i>
+      <p>Sign in with Google to track your orders and speed up checkout next time.</p>
+      <button class="btn btn-primary btn-block" onclick="signInWithGoogle()">Sign in with Google</button>
+    </div>
+    <div class="account-card" id="account-card-in" hidden>
+      <img id="account-avatar-img" class="account-avatar" alt="">
+      <h3 id="account-name"></h3>
+      <p id="account-email" class="field-hint"></p>
+      <button class="btn btn-secondary btn-block" onclick="signOutGoogle()">Sign Out</button>
+    </div>
+  </main>
+
+  <!-- FAQ VIEW — reached from the bottom nav. Content comes from
+       RESTAURANT_CONFIG.faqs (synced via Firestore like everything else),
+       so it can be made admin-editable later without touching this markup. -->
+  <main id="faq-view" hidden>
+    <div class="page-header">
+      <button class="back-btn" onclick="showView('menu')"><i class="fa-solid fa-arrow-left"></i></button>
+      <h2>FAQ</h2>
+    </div>
+    <div id="faq-list"></div>
   </main>
 
   <!-- CART sticky action bar -->
@@ -166,7 +225,8 @@
    CONFIGURATION — edit these to reconfigure the whole store
    ======================================================== */
 const DEFAULT_RESTAURANT_CONFIG = {
-  name: "RHJ WebStore",
+  name: "RHJ Diner",
+  address: "Capalonga, Camarines Norte, Purok 2, Brgy. Poblacion, Custodio Street",
   logo: "logo.jpg",
   // Multiple banners now supported — the storefront auto-scrolls through
   // whichever images are in this array. "banner" (singular) is kept as a
@@ -180,10 +240,32 @@ const DEFAULT_RESTAURANT_CONFIG = {
   // Dates (YYYY-MM-DD) the store can't fulfill pickups on — holidays, fully
   // booked days, etc. Managed from admin.html; customers just won't be able
   // to pick these dates at checkout.
-  blackoutDates: []
+  blackoutDates: [],
+  // Distance-based delivery pricing. shopLat/shopLng is the store's pin,
+  // set from admin.html. Fee = baseFee for anything within freeRadiusKm,
+  // then + perKmFee for every km beyond that. Orders past maxRadiusKm are
+  // blocked at checkout with a "outside delivery area" message.
+  delivery: {
+    enabled: true,
+    shopLat: null,
+    shopLng: null,
+    baseFee: 40,
+    freeRadiusKm: 2,
+    perKmFee: 15,
+    maxRadiusKm: 15
+  },
+  // Shown on the FAQ tab. Plain array so it's easy to hand-edit here for
+  // now; synced through Firestore like everything else in this config, so
+  // an admin.html editor could manage this later without touching index.html.
+  faqs: [
+    { q: "How do I place an order?", a: "Browse the menu, add items to your cart, then go to checkout to fill in your details and choose a pickup or delivery date and time." },
+    { q: "How do I track my order?", a: "Sign in with Google before or after ordering, then check the \"My Orders\" tab — its status updates live as the store approves, prepares, and completes it." },
+    { q: "Can I cancel my order?", a: "Orders can only be cancelled by the store once placed. Contact the store directly as soon as possible if you need to cancel or change something." },
+    { q: "What payment methods do you accept?", a: "Payment details are arranged directly with the store upon pickup or delivery." },
+    { q: "Do I need an account to order?", a: "No — you can check out as a guest. Signing in with Google is optional and only needed if you want to track your order status afterward." }
+  ]
 };
 
-const DELIVERY_CONFIG = { enabled: true, fee: 50 };
 const DISCOUNT_CONFIG  = { enabled: false, amount: 0 };
 // cutoffHour uses 24-hour time (17 = 5:00 PM). Orders placed at or after this
 // hour need one extra day of lead time before pickup — see getEarliestPickupDate().
@@ -249,9 +331,74 @@ if(FIREBASE_ENABLED){
     if(user) document.getElementById('gate-screen').hidden = true; // signing in from the gate itself closes it
     authReady = true;
     tryFinishBoot();
+
+    // My Orders notification badge — only meaningful once signed in, since
+    // guest orders aren't tracked to an account at all.
+    if(ordersBadgeUnsub){ ordersBadgeUnsub(); ordersBadgeUnsub = null; }
+    if(user){
+      ordersBadgeUnsub = db.collection('orders').where('customerUid', '==', user.uid)
+        .onSnapshot(snap => {
+          updateOrdersBadge(snap.docs.map(d => d.data()));
+        }, err => console.error('Could not watch order updates', err));
+    } else {
+      updateOrdersBadge([]);
+    }
   });
 }
 function storeDoc(){ return db.collection('stores').doc('main'); }
+
+/* ======================= MY ORDERS NOTIFICATION BADGE =======================
+   Compares each of the signed-in customer's orders against what they've
+   already "seen" (tracked in localStorage, per account, on this device) to
+   decide whether the My Orders nav icon needs a badge. Priority: a
+   cancellation always wins (red !), then a completion (green check), then
+   a plain count of anything else new (a status change or an admin note).
+   Marking something as seen happens on my-orders.html when a card is
+   opened — this file only ever reads that state, never writes it. */
+const ORDERS_SEEN_KEY = 'myresto_orders_seen_v1';
+let ordersBadgeUnsub = null;
+
+function getSeenMap(uid){
+  try{
+    const all = JSON.parse(localStorage.getItem(ORDERS_SEEN_KEY) || '{}');
+    return all[uid] || {};
+  }catch(e){ return {}; }
+}
+
+function isOrderUnseen(seenMap, order){
+  const seen = seenMap[order.orderNumber];
+  const noteCount = (order.statusLog || []).length;
+  if(!seen) return true;
+  return seen.status !== order.status || seen.noteCount !== noteCount;
+}
+
+function updateOrdersBadge(myOrders){
+  const badge = document.getElementById('my-orders-badge');
+  if(!badge) return;
+  if(!currentUser || !myOrders.length){ badge.hidden = true; return; }
+
+  const seenMap = getSeenMap(currentUser.uid);
+  let hasCancelledUnseen = false, hasCompletedUnseen = false, unseenCount = 0;
+  myOrders.forEach(o => {
+    if(!isOrderUnseen(seenMap, o)) return;
+    unseenCount++;
+    if(o.status === 'cancelled') hasCancelledUnseen = true;
+    else if(o.status === 'completed') hasCompletedUnseen = true;
+  });
+
+  if(hasCancelledUnseen){
+    badge.hidden = false; badge.className = 'bottom-nav-badge alert';
+    badge.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
+  } else if(hasCompletedUnseen){
+    badge.hidden = false; badge.className = 'bottom-nav-badge success';
+    badge.innerHTML = '<i class="fa-solid fa-check"></i>';
+  } else if(unseenCount > 0){
+    badge.hidden = false; badge.className = 'bottom-nav-badge';
+    badge.textContent = String(unseenCount);
+  } else {
+    badge.hidden = true;
+  }
+}
 
 function dataFinishedLoading(){
   dataReady = true;
@@ -279,6 +426,7 @@ function maybeShowGate(){
 function chooseGuest(){
   try{ localStorage.setItem(GUEST_CHOICE_KEY, '1'); }catch(e){}
   document.getElementById('gate-screen').hidden = true;
+  updateSignInUI();
 }
 function gateSignIn(){
   signInWithGoogle(); // gate closes itself via onAuthStateChanged above once sign-in succeeds
@@ -295,7 +443,51 @@ function signInWithGoogle(){
 function signOutGoogle(){
   auth.signOut();
 }
+// Best-effort first name for the topbar greeting. Google sign-in almost
+// always provides displayName, but on the rare account where it's missing,
+// falling back to the raw email would show the whole address (not just a
+// name) — so instead we fall back to the part before "@", title-cased.
+function firstNameOf(user){
+  if(user.displayName) return user.displayName.trim().split(' ')[0];
+  const local = (user.email || '').split('@')[0];
+  if(!local) return 'there';
+  const word = local.split(/[.\-_0-9]+/).filter(Boolean)[0] || local;
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
 function updateSignInUI(){
+  // Bottom-nav Account tab: swaps the generic person icon for the user's
+  // Google profile photo once signed in — pulled straight from their auth
+  // object, so this never touches Firestore (no database cost either way).
+  const navAvatar = document.getElementById('bottom-nav-avatar');
+  if(navAvatar){
+    navAvatar.innerHTML = (currentUser && currentUser.photoURL)
+      ? `<img src="${currentUser.photoURL}" alt="">`
+      : '<i class="fa-solid fa-circle-user"></i>';
+  }
+
+  // Account view (reached from the bottom nav)
+  const acctOut = document.getElementById('account-card-out');
+  const acctIn = document.getElementById('account-card-in');
+  if(acctOut && acctIn){
+    if(currentUser){
+      acctOut.hidden = true;
+      acctIn.hidden = false;
+      const img = document.getElementById('account-avatar-img');
+      if(currentUser.photoURL){
+        img.src = currentUser.photoURL;
+        img.hidden = false;
+      } else {
+        img.hidden = true;
+      }
+      document.getElementById('account-name').textContent = currentUser.displayName || firstNameOf(currentUser);
+      document.getElementById('account-email').textContent = currentUser.email || '';
+    } else {
+      acctOut.hidden = false;
+      acctIn.hidden = true;
+    }
+  }
+
   const out = document.getElementById('signin-card-out');
   const inn = document.getElementById('signin-card-in');
   if(!out || !inn) return; // checkout view not in the DOM yet on first load — fine, re-runs on state change
@@ -385,6 +577,13 @@ function normalizeConfig(cfg){
   if((!Array.isArray(cfg.banners) || !cfg.banners.length) && cfg.banner){
     cfg = { ...cfg, banners: [cfg.banner] };
   }
+  // Fills in delivery settings for any saved config that predates distance
+  // pricing, so nothing breaks for existing stores.
+  cfg = { ...cfg, delivery: { ...DEFAULT_RESTAURANT_CONFIG.delivery, ...(cfg.delivery || {}) } };
+  // Same idea for FAQs — fall back to the defaults if a saved config predates them.
+  if(!Array.isArray(cfg.faqs) || !cfg.faqs.length){
+    cfg = { ...cfg, faqs: DEFAULT_RESTAURANT_CONFIG.faqs };
+  }
   return cfg;
 }
 
@@ -398,7 +597,7 @@ let RESTAURANT_CONFIG = loadConfig();
 let cart = [];
 let lastOrder = null;
 let cartIdSeq = 1;
-let fulfillmentType = 'pickup'; // 'pickup' or 'delivery' — only relevant when DELIVERY_CONFIG.enabled
+let fulfillmentType = 'pickup'; // 'pickup' or 'delivery' — only relevant when RESTAURANT_CONFIG.delivery.enabled
 
 function setFulfillmentType(type){
   fulfillmentType = type;
@@ -410,6 +609,106 @@ function setFulfillmentType(type){
   document.getElementById('label-pickup-date').textContent = isDelivery ? 'Delivery Date *' : 'Pickup Date *';
   document.getElementById('label-pickup-time').textContent = isDelivery ? 'Delivery Time *' : 'Pickup Time *';
   renderCheckout(); // delivery fee only applies for delivery — refresh totals
+}
+
+/* ======================= DISTANCE-BASED DELIVERY FEE =======================
+   The customer's address is geocoded (or captured via GPS) into coordinates,
+   then compared to the shop's pin (set in admin.html) using a straight-line
+   (haversine) distance. Fee = baseFee within freeRadiusKm, then + perKmFee
+   per km beyond that. Orders past maxRadiusKm are blocked at checkout.
+   deliveryQuote holds the last successful calculation; it's cleared whenever
+   the address is edited so a stale distance can never be charged. */
+let deliveryQuote = null; // { distanceKm, fee } | null
+
+function haversineKm(lat1, lon1, lat2, lon2){
+  const R = 6371;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function computeDeliveryFee(distanceKm){
+  const d = RESTAURANT_CONFIG.delivery;
+  if(distanceKm <= d.freeRadiusKm) return Math.round(d.baseFee);
+  return Math.round(d.baseFee + (distanceKm - d.freeRadiusKm) * d.perKmFee);
+}
+
+function onDeliveryAddressEdited(){
+  // Any edit invalidates the last quote — force a fresh calculation so the
+  // charged fee always matches the address actually typed.
+  if(deliveryQuote){
+    deliveryQuote = null;
+    document.getElementById('delivery-fee-status').textContent = 'Address changed — recalculate the delivery fee.';
+    renderCheckout();
+  }
+}
+
+function applyDeliveryDistance(distanceKm, sourceLabel){
+  const d = RESTAURANT_CONFIG.delivery;
+  const status = document.getElementById('delivery-fee-status');
+  if(distanceKm > d.maxRadiusKm){
+    deliveryQuote = null;
+    status.textContent = `Sorry, that's ${distanceKm.toFixed(1)}km away — outside our ${d.maxRadiusKm}km delivery area. Try pickup instead.`;
+  } else {
+    const fee = computeDeliveryFee(distanceKm);
+    deliveryQuote = { distanceKm, fee };
+    status.textContent = `${sourceLabel}: ${distanceKm.toFixed(1)}km away — delivery fee ${money(fee)}.`;
+  }
+  renderCheckout();
+}
+
+async function calculateDeliveryFeeFromAddress(){
+  const d = RESTAURANT_CONFIG.delivery;
+  const status = document.getElementById('delivery-fee-status');
+  if(d.shopLat == null || d.shopLng == null){
+    status.textContent = "Delivery isn't fully set up yet — please contact the store.";
+    return;
+  }
+  const address = document.getElementById('input-delivery-address').value.trim();
+  if(!address){ status.textContent = 'Type your address first.'; return; }
+  status.textContent = 'Looking up your address…';
+  try{
+    // Free OpenStreetMap geocoder — biased toward the shop's area for
+    // better accuracy on short/ambiguous addresses. No API key needed.
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&q=${encodeURIComponent(address)}`;
+    const res = await fetch(url);
+    const results = await res.json();
+    if(!results.length){
+      status.textContent = "Couldn't find that address — try adding more detail (barangay, city), or use \"Use My Location\" instead.";
+      deliveryQuote = null;
+      renderCheckout();
+      return;
+    }
+    const { lat, lon } = results[0];
+    const distanceKm = haversineKm(d.shopLat, d.shopLng, parseFloat(lat), parseFloat(lon));
+    applyDeliveryDistance(distanceKm, 'Address found');
+  }catch(e){
+    console.error(e);
+    status.textContent = "Couldn't look up that address — check your connection and try again, or use \"Use My Location\".";
+    deliveryQuote = null;
+    renderCheckout();
+  }
+}
+
+function calculateDeliveryFeeFromGPS(){
+  const d = RESTAURANT_CONFIG.delivery;
+  const status = document.getElementById('delivery-fee-status');
+  if(d.shopLat == null || d.shopLng == null){
+    status.textContent = "Delivery isn't fully set up yet — please contact the store.";
+    return;
+  }
+  if(!navigator.geolocation){ status.textContent = "This browser can't get your location."; return; }
+  status.textContent = 'Getting your location…';
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const distanceKm = haversineKm(d.shopLat, d.shopLng, pos.coords.latitude, pos.coords.longitude);
+      applyDeliveryDistance(distanceKm, 'Your location');
+    },
+    err => { status.textContent = "Couldn't get your location — check location permission for this site."; },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
 }
 
 /* ======================= INIT ======================= */
@@ -550,15 +849,45 @@ function basePrice(p){ return Math.min(...p.sizes.map(s=>s.price)); }
 
 /* ======================= VIEW SWITCHING ======================= */
 function showView(name){
-  ['menu','cart','checkout','success'].forEach(v=>{
+  ['menu','cart','checkout','success','account','faq'].forEach(v=>{
     document.getElementById(v+'-view').hidden = (v!==name);
   });
   document.getElementById('cart-actionbar').hidden = (name!=='cart' || cart.length===0);
   document.getElementById('checkout-actionbar').hidden = (name!=='checkout');
 
+  // Per your choice, the bottom nav only shows on the Menu view itself —
+  // Account and My Orders are reached *from* it, and each of those screens
+  // has its own back arrow to return to Menu.
+  const bottomNav = document.getElementById('bottom-nav');
+  bottomNav.hidden = (name!=='menu');
+  bottomNav.querySelectorAll('.bottom-nav-item[data-tab]').forEach(el=>{
+    el.classList.toggle('active', el.dataset.tab === name);
+  });
+
   if(name==='cart') renderCart();
   if(name==='checkout') renderCheckout();
+  if(name==='faq') renderFaq();
   window.scrollTo(0,0);
+}
+
+/* ======================= FAQ ======================= */
+let openFaqIndex = null;
+function renderFaq(){
+  const list = document.getElementById('faq-list');
+  const faqs = RESTAURANT_CONFIG.faqs || [];
+  list.innerHTML = faqs.map((item, i) => `
+    <div class="faq-item">
+      <button class="faq-question" onclick="toggleFaq(${i})">
+        <span>${item.q}</span>
+        <i class="fa-solid fa-chevron-down ${openFaqIndex===i ? 'open' : ''}"></i>
+      </button>
+      <div class="faq-answer" ${openFaqIndex===i ? '' : 'hidden'}>${item.a}</div>
+    </div>
+  `).join('');
+}
+function toggleFaq(i){
+  openFaqIndex = (openFaqIndex === i) ? null : i;
+  renderFaq();
 }
 
 /* ======================= MENU ======================= */
@@ -615,7 +944,7 @@ function openProduct(id){
       <div class="modal-sheet">
         <div class="modal-wrap">
           <img class="modal-main-img" id="modal-main-img" src="${p.images[0]}" alt="${p.name}">
-          <button class="close-modal" onclick="closeModal()">✕</button>
+          <button class="close-modal" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button>
         </div>
         ${p.images.length>1 ? `<div class="modal-thumbs">${thumbs}</div>` : ''}
         <div class="modal-body">
@@ -727,7 +1056,7 @@ function updateCartCount(animate){
 }
 function cartTotals(){
   const subtotal = cart.reduce((a,l)=>a + l.unitPrice*l.qty, 0);
-  const delivery = (DELIVERY_CONFIG.enabled && fulfillmentType === 'delivery' && subtotal>0) ? DELIVERY_CONFIG.fee : 0;
+  const delivery = (RESTAURANT_CONFIG.delivery.enabled && fulfillmentType === 'delivery' && subtotal>0 && deliveryQuote) ? deliveryQuote.fee : 0;
   const discount = DISCOUNT_CONFIG.enabled ? DISCOUNT_CONFIG.amount : 0;
   const total = Math.max(0, subtotal + delivery - discount);
   return { subtotal, delivery, discount, total };
@@ -771,8 +1100,8 @@ function renderCart(){
 
   let summaryHtml = `<div class="summary-box">
     <div class="summary-row"><span>Subtotal</span><span>${money(t.subtotal)}</span></div>`;
-  if(DELIVERY_CONFIG.enabled && fulfillmentType === 'delivery'){
-    summaryHtml += `<div class="summary-row"><span>Delivery Fee</span><span>${money(t.delivery)}</span></div>`;
+  if(RESTAURANT_CONFIG.delivery.enabled && fulfillmentType === 'delivery'){
+    summaryHtml += `<div class="summary-row"><span>Delivery Fee</span><span>${deliveryQuote ? money(t.delivery) : 'Calculate at checkout'}</span></div>`;
   }
   if(DISCOUNT_CONFIG.enabled && t.discount>0){
     summaryHtml += `<div class="summary-row"><span>Discount</span><span>-${money(t.discount)}</span></div>`;
@@ -784,8 +1113,8 @@ function renderCart(){
 
 /* ======================= CHECKOUT ======================= */
 function renderCheckout(){
-  document.getElementById('field-fulfillment').hidden = !DELIVERY_CONFIG.enabled;
-  if(!DELIVERY_CONFIG.enabled) fulfillmentType = 'pickup'; // no choice to make — pickup only, as before
+  document.getElementById('field-fulfillment').hidden = !RESTAURANT_CONFIG.delivery.enabled;
+  if(!RESTAURANT_CONFIG.delivery.enabled) fulfillmentType = 'pickup'; // no choice to make — pickup only, as before
 
   const lines = document.getElementById('checkout-lines');
   lines.innerHTML = cart.map(line=>`
@@ -800,8 +1129,8 @@ function renderCheckout(){
 
   const t = cartTotals();
   let totalsHtml = `<div class="summary-row"><span>Subtotal</span><span>${money(t.subtotal)}</span></div>`;
-  if(DELIVERY_CONFIG.enabled && fulfillmentType === 'delivery'){
-    totalsHtml += `<div class="summary-row"><span>Delivery Fee</span><span>${money(t.delivery)}</span></div>`;
+  if(RESTAURANT_CONFIG.delivery.enabled && fulfillmentType === 'delivery'){
+    totalsHtml += `<div class="summary-row"><span>Delivery Fee</span><span>${deliveryQuote ? money(t.delivery) : 'Not calculated yet'}</span></div>`;
   }
   if(DISCOUNT_CONFIG.enabled && t.discount>0){
     totalsHtml += `<div class="summary-row"><span>Discount</span><span>-${money(t.discount)}</span></div>`;
@@ -884,6 +1213,7 @@ function placeOrder(){
   const pickupDate = document.getElementById('input-pickup-date').value;
   const pickupTime = document.getElementById('input-pickup-time').value;
   const deliveryAddress = document.getElementById('input-delivery-address').value.trim();
+  const orderNotes = document.getElementById('input-order-notes').value.trim();
 
   let valid = true;
   const nameField = document.getElementById('field-name');
@@ -911,10 +1241,17 @@ function placeOrder(){
   pickupTimeField.classList.toggle('invalid', pickupTime==='');
   if(pickupTime==='') valid=false;
 
-  const isDelivery = DELIVERY_CONFIG.enabled && fulfillmentType === 'delivery';
+  const isDelivery = RESTAURANT_CONFIG.delivery.enabled && fulfillmentType === 'delivery';
+  const deliveryStatus = document.getElementById('delivery-fee-status');
   if(isDelivery){
     deliveryAddressField.classList.toggle('invalid', deliveryAddress==='');
     if(deliveryAddress==='') valid=false;
+    else if(!deliveryQuote){
+      // Address was typed/edited but the fee was never (re)calculated —
+      // block submission rather than silently charging ₱0 or a stale fee.
+      deliveryStatus.textContent = 'Please calculate your delivery fee before placing the order.';
+      valid = false;
+    }
   } else {
     deliveryAddressField.classList.remove('invalid');
   }
@@ -955,8 +1292,13 @@ function placeOrder(){
       status: "pending"
     };
 
+    if(orderNotes){
+      lastOrder.customerNote = orderNotes;
+    }
+
     if(isDelivery){
       lastOrder.deliveryAddress = deliveryAddress;
+      lastOrder.deliveryDistanceKm = Math.round(deliveryQuote.distanceKm * 10) / 10;
     }
 
     if(currentUser){
@@ -1035,7 +1377,7 @@ function renderSuccess(order){
   });
 
   let totalsHtml = `<div><span>Subtotal</span><span>${money(order.subtotal)}</span></div>`;
-  if(DELIVERY_CONFIG.enabled && order.fulfillmentType === 'delivery'){
+  if(order.fulfillmentType === 'delivery'){
     totalsHtml += `<div><span>Delivery Fee</span><span>${money(order.delivery)}</span></div>`;
   }
   if(DISCOUNT_CONFIG.enabled && order.discount>0){
@@ -1048,6 +1390,7 @@ function renderSuccess(order){
       <div class="r-center">
         <img class="r-logo" src="${RESTAURANT_CONFIG.logo}" alt="logo">
         <div class="r-name">${RESTAURANT_CONFIG.name}</div>
+        ${RESTAURANT_CONFIG.address ? `<div class="r-address">${RESTAURANT_CONFIG.address}</div>` : ''}
         <div class="r-sub">Order Receipt</div>
       </div>
       <div class="r-divider"></div>
@@ -1063,6 +1406,10 @@ function renderSuccess(order){
       <div class="r-block-title">${order.fulfillmentType === 'delivery' ? 'Delivery' : 'Pickup'}</div>
       <div class="r-pickup">${order.pickupDate} · ${order.pickupTime}</div>
       ${order.fulfillmentType === 'delivery' ? `<div class="r-cust-contact">${order.deliveryAddress}</div>` : ''}
+      ${order.customerNote ? `
+        <div class="r-block-title">Note</div>
+        <div class="r-cust-contact">${order.customerNote}</div>
+      ` : ''}
       <div class="r-divider"></div>
       <div class="r-block-title">Order</div>
       ${itemsHtml}
@@ -1103,7 +1450,7 @@ function showSendReceiptPopup(){
   root.innerHTML = `
     <div class="modal-backdrop send-receipt-backdrop" onclick="if(event.target===this) closeSendReceiptPopup()">
       <div class="send-receipt-sheet">
-        <div class="send-receipt-icon">💬</div>
+        <div class="send-receipt-icon"><i class="fa-brands fa-facebook-messenger"></i></div>
         <h3>Send the receipt here</h3>
         <p>Please open Messenger and send your saved receipt so we can confirm your order.</p>
         ${hasMessenger
@@ -1121,8 +1468,11 @@ function closeSendReceiptPopup(){
 
 function resetToMenu(){
   lastOrder = null;
+  deliveryQuote = null;
   document.getElementById('receipt-mount').innerHTML = '';
   document.getElementById('input-delivery-address').value = '';
+  document.getElementById('input-order-notes').value = '';
+  document.getElementById('delivery-fee-status').textContent = '';
   setFulfillmentType('pickup');
   showView('menu');
 }
