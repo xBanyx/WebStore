@@ -58,7 +58,7 @@
     </button>
     <button class="bottom-nav-item" data-tab="account" onclick="showView('account')">
       <span class="bottom-nav-avatar" id="bottom-nav-avatar"><i class="fa-solid fa-circle-user"></i></span>
-      <span>Account</span>
+      <span id="bottom-nav-account-label">Account</span>
     </button>
   </nav>
 
@@ -189,6 +189,29 @@
       <p id="account-email" class="field-hint"></p>
       <button class="btn btn-secondary btn-block" onclick="signOutGoogle()">Sign Out</button>
     </div>
+
+    <!-- CONTACT US — Messenger / Phone links, admin-editable via
+         RESTAURANT_CONFIG.messengerUrl / .phoneNumber. Each row hides
+         itself if that field hasn't been set. -->
+    <div class="account-card" id="contact-us-card">
+      <h3 style="margin:0 0 10px;">Contact Us</h3>
+      <a class="contact-row" id="contact-messenger-row" href="#" target="_blank" rel="noopener">
+        <span class="contact-row-icon"><i class="fa-brands fa-facebook-messenger"></i></span>
+        <span class="contact-row-text">
+          <strong>Messenger</strong>
+          <span class="field-hint">Chat with us</span>
+        </span>
+        <i class="fa-solid fa-chevron-right contact-row-arrow"></i>
+      </a>
+      <a class="contact-row" id="contact-phone-row" href="#">
+        <span class="contact-row-icon"><i class="fa-solid fa-phone"></i></span>
+        <span class="contact-row-text">
+          <strong>Phone</strong>
+          <span class="field-hint" id="contact-phone-number"></span>
+        </span>
+        <i class="fa-solid fa-chevron-right contact-row-arrow"></i>
+      </a>
+    </div>
   </main>
 
   <!-- FAQ VIEW — reached from the bottom nav. Content comes from
@@ -228,6 +251,12 @@ const DEFAULT_RESTAURANT_CONFIG = {
   name: "RHJ Diner",
   address: "Capalonga, Camarines Norte, Purok 2, Brgy. Poblacion, Custodio Street",
   logo: "logo.jpg",
+  // Shown on the Account page's "Contact Us" card and after a receipt
+  // download — editable from admin.html. Pre-filled with the store's
+  // existing Messenger page so nothing breaks for stores that already had
+  // this set up before the admin-editable field existed.
+  messengerUrl: "https://m.me/hilda.alto.9",
+  phoneNumber: "",
   // Multiple banners now supported — the storefront auto-scrolls through
   // whichever images are in this array. "banner" (singular) is kept as a
   // fallback for any old saved config that predates this feature.
@@ -273,22 +302,9 @@ const DISCOUNT_CONFIG  = { enabled: false, amount: 0 };
 const PICKUP_CONFIG = { enabled: true, cutoffHour: 15 };
 
 // Facebook Messenger link shown after a customer downloads their receipt,
-// so they can send it straight to the store. Set "username" to your store's
-// Facebook Page username (the part after facebook.com/) — e.g. if your page
-// is facebook.com/rhjeats, use "rhjeats" below. m.me links open a direct
-// Messenger chat with that page.
-//
-// You can also paste the full Page URL here (e.g. "https://www.facebook.com/
-// hilda.alto.9") — it's cleaned up automatically below, so a stray "#",
-// trailing slash, or "www." won't break the link.
-const MESSENGER_CONFIG = (() => {
-  const raw = "hilda.alto.9";
-  const username = raw
-    .trim()
-    .replace(/^https?:\/\/(www\.)?(m\.me|facebook\.com|fb\.com)\//i, "") // strip full URL down to the page name
-    .replace(/[/#?].*$/, ""); // drop any trailing #, /, or ?query left over
-  return { username };
-})();
+// and on the Account page's Contact Us card. Both pull from the same
+// admin-editable field (RESTAURANT_CONFIG.messengerUrl, set in admin.html
+// → Store Info), so there's one place to update it instead of two.
 
 // Local cache keys — used for an instant first paint, and as a fallback if
 // cloud sync isn't configured. See firebase-config.js: localStorage only
@@ -459,12 +475,15 @@ function updateSignInUI(){
   // Bottom-nav Account tab: swaps the generic person icon for the user's
   // Google profile photo once signed in — pulled straight from their auth
   // object, so this never touches Firestore (no database cost either way).
+  // The label swaps too — first name instead of "Account" once signed in.
   const navAvatar = document.getElementById('bottom-nav-avatar');
   if(navAvatar){
     navAvatar.innerHTML = (currentUser && currentUser.photoURL)
       ? `<img src="${currentUser.photoURL}" alt="">`
       : '<i class="fa-solid fa-circle-user"></i>';
   }
+  const navLabel = document.getElementById('bottom-nav-account-label');
+  if(navLabel) navLabel.textContent = currentUser ? firstNameOf(currentUser) : 'Account';
 
   // Account view (reached from the bottom nav)
   const acctOut = document.getElementById('account-card-out');
@@ -760,11 +779,36 @@ function applyConfig(){
   document.getElementById('cfg-name').textContent = RESTAURANT_CONFIG.name;
   document.getElementById('cfg-logo').src = RESTAURANT_CONFIG.logo;
   renderBanners();
+  renderContactUs();
   const loadingLogo = document.getElementById('loading-logo');
   if(loadingLogo && RESTAURANT_CONFIG.logo){
     loadingLogo.src = RESTAURANT_CONFIG.logo;
     loadingLogo.classList.add('show');
   }
+}
+
+// Account page's "Contact Us" card — each row only shows if the admin has
+// set that field (admin.html → Store Info). If neither is set, the whole
+// card hides rather than showing two dead rows.
+function renderContactUs(){
+  const card = document.getElementById('contact-us-card');
+  const msgRow = document.getElementById('contact-messenger-row');
+  const phoneRow = document.getElementById('contact-phone-row');
+  if(!card || !msgRow || !phoneRow) return;
+
+  const messengerUrl = (RESTAURANT_CONFIG.messengerUrl || '').trim();
+  const phoneNumber = (RESTAURANT_CONFIG.phoneNumber || '').trim();
+
+  msgRow.hidden = !messengerUrl;
+  if(messengerUrl) msgRow.href = messengerUrl;
+
+  phoneRow.hidden = !phoneNumber;
+  if(phoneNumber){
+    phoneRow.href = 'tel:' + phoneNumber.replace(/[^\d+]/g, '');
+    document.getElementById('contact-phone-number').textContent = phoneNumber;
+  }
+
+  card.hidden = !messengerUrl && !phoneNumber;
 }
 
 let loadingScreenHidden = false;
@@ -841,6 +885,11 @@ function init(){
       topbarEl.classList.toggle('scrolled', window.scrollY > 4);
     }, { passive:true });
   }
+
+  // Deep-link support — lets other pages (like my-orders.html's bottom
+  // nav) link straight into a view with e.g. index.html#account.
+  const deepLinkView = (location.hash || '').replace('#', '');
+  if(['faq','account'].includes(deepLinkView)) showView(deepLinkView);
 }
 
 function getProduct(id){ return PRODUCTS.find(p=>p.id===id); }
@@ -855,11 +904,10 @@ function showView(name){
   document.getElementById('cart-actionbar').hidden = (name!=='cart' || cart.length===0);
   document.getElementById('checkout-actionbar').hidden = (name!=='checkout');
 
-  // Per your choice, the bottom nav only shows on the Menu view itself —
-  // Account and My Orders are reached *from* it, and each of those screens
-  // has its own back arrow to return to Menu.
+  // Bottom nav shows on Menu, FAQ, and Account — but not Cart/Checkout/
+  // Success, which are a linear flow with their own back arrow.
   const bottomNav = document.getElementById('bottom-nav');
-  bottomNav.hidden = (name!=='menu');
+  bottomNav.hidden = !['menu','faq','account'].includes(name);
   bottomNav.querySelectorAll('.bottom-nav-item[data-tab]').forEach(el=>{
     el.classList.toggle('active', el.dataset.tab === name);
   });
@@ -1445,15 +1493,14 @@ function downloadReceipt(){
 // it to the store's Messenger so the order actually gets seen.
 function showSendReceiptPopup(){
   const root = document.getElementById('send-receipt-root');
-  const hasMessenger = MESSENGER_CONFIG.username && MESSENGER_CONFIG.username !== "yourpagename";
-  const messengerUrl = `https://m.me/${MESSENGER_CONFIG.username}`;
+  const messengerUrl = (RESTAURANT_CONFIG.messengerUrl || '').trim();
   root.innerHTML = `
     <div class="modal-backdrop send-receipt-backdrop" onclick="if(event.target===this) closeSendReceiptPopup()">
       <div class="send-receipt-sheet">
         <div class="send-receipt-icon"><i class="fa-brands fa-facebook-messenger"></i></div>
         <h3>Send the receipt here</h3>
         <p>Please open Messenger and send your saved receipt so we can confirm your order.</p>
-        ${hasMessenger
+        ${messengerUrl
           ? `<a class="btn btn-primary" href="${messengerUrl}" target="_blank" rel="noopener" onclick="closeSendReceiptPopup()">Open Messenger</a>`
           : `<p class="send-receipt-note">Messenger link coming soon — please send it directly to the store for now.</p>`
         }

@@ -95,6 +95,25 @@
   </div>
 </div>
 
+<!-- BOTTOM NAV — same tabs as index.html. Menu/FAQ/Account link back into
+     index.html (FAQ and Account as hash deep-links, since those are views
+     inside its single-page app rather than separate files). -->
+<nav class="bottom-nav">
+  <a class="bottom-nav-item" href="index.html">
+    <i class="fa-solid fa-utensils"></i><span>Menu</span>
+  </a>
+  <span class="bottom-nav-item active">
+    <i class="fa-solid fa-receipt"></i><span>My Orders</span>
+  </span>
+  <a class="bottom-nav-item" href="index.html#faq">
+    <i class="fa-solid fa-circle-question"></i><span>FAQ</span>
+  </a>
+  <a class="bottom-nav-item" href="index.html#account">
+    <span class="bottom-nav-avatar" id="bottom-nav-avatar"><i class="fa-solid fa-circle-user"></i></span>
+    <span id="bottom-nav-account-label">Account</span>
+  </a>
+</nav>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -150,6 +169,7 @@ if(FIREBASE_ENABLED){
       document.getElementById('mo-signed-out').hidden = false;
       document.getElementById('mo-signed-in').hidden = true;
     }
+    updateBottomNavAccount(user);
   });
 
   // Pull in the store's name for the header, same shared doc admin.html manages.
@@ -170,6 +190,27 @@ function signIn(){
 }
 function signOutUser(){
   auth.signOut();
+}
+
+// Bottom-nav Account tab — mirrors the same first-name-or-email-prefix
+// fallback used on index.html, so the label matches wherever you are.
+function updateBottomNavAccount(user){
+  const navAvatar = document.getElementById('bottom-nav-avatar');
+  const navLabel = document.getElementById('bottom-nav-account-label');
+  if(!navAvatar || !navLabel) return;
+  if(user){
+    navAvatar.innerHTML = user.photoURL ? `<img src="${user.photoURL}" alt="">` : '<i class="fa-solid fa-circle-user"></i>';
+    let name = user.displayName ? user.displayName.trim().split(' ')[0] : '';
+    if(!name){
+      const local = (user.email || '').split('@')[0];
+      const word = local.split(/[.\-_0-9]+/).filter(Boolean)[0] || local;
+      name = word ? word.charAt(0).toUpperCase() + word.slice(1) : 'Account';
+    }
+    navLabel.textContent = name;
+  } else {
+    navAvatar.innerHTML = '<i class="fa-solid fa-circle-user"></i>';
+    navLabel.textContent = 'Account';
+  }
 }
 
 // Filtered by customerUid client-side after fetching, rather than a
