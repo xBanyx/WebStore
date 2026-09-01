@@ -111,7 +111,11 @@
   }
 
   /* ---------- Views ---------- */
-  main{padding-bottom:24px;}
+  /* Extra bottom padding so scrollable content clears the fixed bottom nav
+     bar instead of the last bit getting hidden behind it — this needs to
+     be generous enough for iOS's home-indicator safe area too, which is
+     where the gap was most noticeable (e.g. iPhone 12 Pro and newer). */
+  main{padding-bottom:calc(100px + env(safe-area-inset-bottom));}
   [hidden]{display:none !important;}
 
   .page-header{
@@ -226,8 +230,12 @@
   .contact-row-text .field-hint{margin:2px 0 0;}
   .contact-row-arrow{color:var(--muted);font-size:12px;}
 
-  /* ---------- FAQ ---------- */
-  #faq-list{padding:12px 16px 24px;}
+  /* ---------- FAQ (shown on the Account page) ---------- */
+  .section-label{
+    padding:20px 16px 4px;font-size:12px;font-weight:800;letter-spacing:.04em;
+    text-transform:uppercase;color:var(--muted);
+  }
+  #faq-list{padding:8px 16px 24px;}
   .faq-item{background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:10px;overflow:hidden;}
   .faq-question{
     width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;
@@ -236,6 +244,19 @@
   .faq-question i{color:var(--muted);font-size:13px;transition:transform .2s;flex-shrink:0;}
   .faq-question i.open{transform:rotate(180deg);}
   .faq-answer{padding:0 16px 16px;font-size:13.5px;color:var(--muted);line-height:1.5;}
+
+  /* ---------- Location ---------- */
+  #location-map-wrap{padding:16px;}
+  #location-map-link{
+    display:block;border-radius:var(--radius);overflow:hidden;
+    border:1px solid var(--border);margin-bottom:10px;position:relative;
+  }
+  #location-map-img{width:100%;height:auto;display:block;background:var(--bg);min-height:160px;}
+  #location-map-link::after{
+    content:"Tap to open full map";position:absolute;left:0;right:0;bottom:0;
+    background:rgba(0,0,0,.55);color:#fff;font-size:11px;font-weight:700;
+    text-align:center;padding:6px;
+  }
 
   .btn{
     flex:1;padding:14px;border-radius:12px;font-weight:700;font-size:15px;text-align:center;

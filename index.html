@@ -53,8 +53,8 @@
       </span>
       <span>My Orders</span>
     </a>
-    <button class="bottom-nav-item" data-tab="faq" onclick="showView('faq')">
-      <i class="fa-solid fa-circle-question"></i><span>FAQ</span>
+    <button class="bottom-nav-item" data-tab="location" onclick="showView('location')">
+      <i class="fa-solid fa-location-dot"></i><span>Visit Us</span>
     </button>
     <button class="bottom-nav-item" data-tab="account" onclick="showView('account')">
       <span class="bottom-nav-avatar" id="bottom-nav-avatar"><i class="fa-solid fa-circle-user"></i></span>
@@ -190,8 +190,37 @@
       <button class="btn btn-secondary btn-block" onclick="signOutGoogle()">Sign Out</button>
     </div>
 
-    <!-- CONTACT US — Messenger / Phone links, admin-editable via
-         RESTAURANT_CONFIG.messengerUrl / .phoneNumber. Each row hides
+    <!-- FAQ — moved here from its own bottom-nav tab. Content comes from
+         RESTAURANT_CONFIG.faqs (synced via Firestore like everything else). -->
+    <div class="section-label">FAQ</div>
+    <div id="faq-list"></div>
+  </main>
+
+  <!-- "VISIT US" VIEW — reached from the bottom nav. Static map preview
+       (OpenStreetMap, no API key needed) built from RESTAURANT_CONFIG's
+       shopLat/shopLng — the same pin already used for delivery pricing.
+       Tapping it (or the button under it) opens RESTAURANT_CONFIG.mapsUrl,
+       your real Google Maps listing, set in admin.html. -->
+  <main id="location-view" hidden>
+    <div class="page-header">
+      <button class="back-btn" onclick="showView('menu')"><i class="fa-solid fa-arrow-left"></i></button>
+      <h2>Visit Us</h2>
+    </div>
+    <div id="location-map-wrap">
+      <a id="location-map-link" href="#" target="_blank" rel="noopener">
+        <img id="location-map-img" alt="Map showing the store's location">
+      </a>
+      <button class="btn btn-secondary btn-block" id="location-directions-btn" onclick="openFullMap()">
+        <i class="fa-solid fa-diamond-turn-right"></i> Open in Maps
+      </button>
+    </div>
+    <p id="location-map-empty" class="field-hint" hidden style="padding:16px;">
+      The store hasn't set a map location yet.
+    </p>
+
+    <!-- CONTACT US — moved here from the Account page, so location + how
+         to reach us sit together. Messenger / Phone links, admin-editable
+         via RESTAURANT_CONFIG.messengerUrl / .phoneNumber. Each row hides
          itself if that field hasn't been set. -->
     <div class="account-card" id="contact-us-card">
       <h3 style="margin:0 0 10px;">Contact Us</h3>
@@ -212,17 +241,6 @@
         <i class="fa-solid fa-chevron-right contact-row-arrow"></i>
       </a>
     </div>
-  </main>
-
-  <!-- FAQ VIEW — reached from the bottom nav. Content comes from
-       RESTAURANT_CONFIG.faqs (synced via Firestore like everything else),
-       so it can be made admin-editable later without touching this markup. -->
-  <main id="faq-view" hidden>
-    <div class="page-header">
-      <button class="back-btn" onclick="showView('menu')"><i class="fa-solid fa-arrow-left"></i></button>
-      <h2>FAQ</h2>
-    </div>
-    <div id="faq-list"></div>
   </main>
 
   <!-- CART sticky action bar -->
@@ -257,6 +275,7 @@ const DEFAULT_RESTAURANT_CONFIG = {
   // this set up before the admin-editable field existed.
   messengerUrl: "https://m.me/hilda.alto.9",
   phoneNumber: "",
+  mapsUrl: "https://maps.app.goo.gl/JqkgXMntFhBrvKMt9",
   // Multiple banners now supported — the storefront auto-scrolls through
   // whichever images are in this array. "banner" (singular) is kept as a
   // fallback for any old saved config that predates this feature.
@@ -898,27 +917,28 @@ function basePrice(p){ return Math.min(...p.sizes.map(s=>s.price)); }
 
 /* ======================= VIEW SWITCHING ======================= */
 function showView(name){
-  ['menu','cart','checkout','success','account','faq'].forEach(v=>{
+  ['menu','cart','checkout','success','account','location'].forEach(v=>{
     document.getElementById(v+'-view').hidden = (v!==name);
   });
   document.getElementById('cart-actionbar').hidden = (name!=='cart' || cart.length===0);
   document.getElementById('checkout-actionbar').hidden = (name!=='checkout');
 
-  // Bottom nav shows on Menu, FAQ, and Account — but not Cart/Checkout/
+  // Bottom nav shows on Menu, Location, and Account — but not Cart/Checkout/
   // Success, which are a linear flow with their own back arrow.
   const bottomNav = document.getElementById('bottom-nav');
-  bottomNav.hidden = !['menu','faq','account'].includes(name);
+  bottomNav.hidden = !['menu','location','account'].includes(name);
   bottomNav.querySelectorAll('.bottom-nav-item[data-tab]').forEach(el=>{
     el.classList.toggle('active', el.dataset.tab === name);
   });
 
   if(name==='cart') renderCart();
   if(name==='checkout') renderCheckout();
-  if(name==='faq') renderFaq();
+  if(name==='account') renderFaq();
+  if(name==='location') renderLocation();
   window.scrollTo(0,0);
 }
 
-/* ======================= FAQ ======================= */
+/* ======================= FAQ (shown on the Account page) ======================= */
 let openFaqIndex = null;
 function renderFaq(){
   const list = document.getElementById('faq-list');
@@ -936,6 +956,43 @@ function renderFaq(){
 function toggleFaq(i){
   openFaqIndex = (openFaqIndex === i) ? null : i;
   renderFaq();
+}
+
+/* ======================= VISIT US (map) ======================= */
+// The static preview image is still built from shopLat/shopLng (free,
+// no API key — OpenStreetMap). The tap-through destination prefers your
+// actual Google Maps share link (set in admin.html) since that points to
+// your real verified listing — falls back to a plain coordinate search if
+// that link hasn't been set.
+function getMapsUrl(){
+  const custom = (RESTAURANT_CONFIG.mapsUrl || '').trim();
+  if(custom) return custom;
+  const { shopLat, shopLng } = RESTAURANT_CONFIG.delivery || {};
+  if(shopLat == null || shopLng == null) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${shopLat},${shopLng}`;
+}
+function renderLocation(){
+  const { shopLat, shopLng } = RESTAURANT_CONFIG.delivery || {};
+  const wrap = document.getElementById('location-map-wrap');
+  const empty = document.getElementById('location-map-empty');
+  const mapsUrl = getMapsUrl();
+
+  if(shopLat == null || shopLng == null || !mapsUrl){
+    wrap.hidden = true;
+    empty.hidden = false;
+    return;
+  }
+  wrap.hidden = false;
+  empty.hidden = true;
+
+  const img = document.getElementById('location-map-img');
+  img.src = `https://staticmap.openstreetmap.de/staticmap.php?center=${shopLat},${shopLng}&zoom=16&size=600x300&markers=${shopLat},${shopLng},red-pushpin`;
+  document.getElementById('location-map-link').href = mapsUrl;
+}
+function openFullMap(){
+  const mapsUrl = getMapsUrl();
+  if(!mapsUrl) return;
+  window.open(mapsUrl, '_blank', 'noopener');
 }
 
 /* ======================= MENU ======================= */
