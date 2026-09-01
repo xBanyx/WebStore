@@ -99,6 +99,11 @@
         <input type="text" id="cfg-phone-input" placeholder="09XXXXXXXXX">
       </div>
       <div class="field">
+        <label>Google Maps Link <span style="font-weight:400;color:var(--muted,#8a8078);">(shown on the "Visit Us" tab)</span></label>
+        <input type="text" id="cfg-maps-url-input" placeholder="https://maps.app.goo.gl/...">
+        <p class="field-hint">Open your store on Google Maps, tap Share, and copy the link here.</p>
+      </div>
+      <div class="field">
         <label>Logo</label>
         <div class="logo-preview-row">
           <img id="cfg-logo-preview" class="logo-preview" alt="logo preview">
@@ -357,6 +362,7 @@ const DEFAULT_RESTAURANT_CONFIG = {
   logo: "https://picsum.photos/seed/resto-logo/100/100",
   messengerUrl: "https://m.me/hilda.alto.9",
   phoneNumber: "",
+  mapsUrl: "https://maps.app.goo.gl/JqkgXMntFhBrvKMt9",
   banners: [
     "https://picsum.photos/seed/resto-banner/800/300",
     "https://picsum.photos/seed/resto-banner-2/800/300",
@@ -668,6 +674,7 @@ function renderConfigUI(){
   document.getElementById('cfg-menu-url-input').value = config.menuUrl || '';
   document.getElementById('cfg-messenger-input').value = config.messengerUrl || '';
   document.getElementById('cfg-phone-input').value = config.phoneNumber || '';
+  document.getElementById('cfg-maps-url-input').value = config.mapsUrl || '';
   document.getElementById('cfg-logo-preview').src = config.logo;
   renderBannersUI();
   renderBlackoutUI();
@@ -798,6 +805,7 @@ function saveConfig(){
   config.menuUrl = document.getElementById('cfg-menu-url-input').value.trim();
   config.messengerUrl = document.getElementById('cfg-messenger-input').value.trim();
   config.phoneNumber = document.getElementById('cfg-phone-input').value.trim();
+  config.mapsUrl = document.getElementById('cfg-maps-url-input').value.trim();
   config.logo = config.logo || DEFAULT_RESTAURANT_CONFIG.logo;
   if(!config.banners || !config.banners.length) config.banners = [...DEFAULT_RESTAURANT_CONFIG.banners];
   config.banner = config.banners[0]; // kept in sync for anything still reading the old single-banner field
