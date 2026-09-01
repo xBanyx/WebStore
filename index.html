@@ -1489,9 +1489,9 @@ function saveOrder(order){
 /* ======================= SUCCESS + RECEIPT (HTML/CSS) ======================= */
 function renderSuccess(order){
   document.getElementById('success-thanks').textContent =
-    `Thank you, ${order.customerName}! Wait for the store to approve your order.`;
+    `Thank you, ${order.customerName}! Download the receipt down below.`;
   document.getElementById('success-sub').innerHTML =
-    `To know if your order is approved, the store will send you a message — or check <a href="my-orders.html">My Orders</a>.`;
+    `To know if your order is approved, the store will send you a message — or check <a href="my-orders.html">My Orders</a> if you're logged in.`;
 
   const dateStr = order.date.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' });
   const timeStr = order.date.toLocaleTimeString('en-PH', { hour:'numeric', minute:'2-digit' });
