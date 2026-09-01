@@ -69,6 +69,7 @@
     <div class="sidebar-links">
       <a class="sidebar-link" href="admin.html"><i class="fa-solid fa-clipboard-list"></i> Menu Admin</a>
       <span class="sidebar-link current"><i class="fa-solid fa-receipt"></i> Orders</span>
+      <a class="sidebar-link" href="stats.html"><i class="fa-solid fa-chart-line"></i> Statistics</a>
       <a class="sidebar-link" href="index.html" target="_blank"><i class="fa-solid fa-arrow-up-right-from-square"></i> View Store</a>
       <button class="sidebar-link" id="notify-btn" onclick="toggleNotifications()"><i class="fa-solid fa-bell-slash"></i> Notifications</button>
     </div>
@@ -418,6 +419,13 @@ function render(){
             <div class="order-detail-row" style="margin-top:10px;"><strong>Subtotal:</strong> ${money(o.subtotal)}</div>
             ${o.delivery ? `<div class="order-detail-row"><strong>Delivery Fee:</strong> ${money(o.delivery)}</div>` : ''}
             ${o.discount ? `<div class="order-detail-row"><strong>Discount:</strong> -${money(o.discount)}</div>` : ''}
+            ${o.rating ? `
+              <div class="section-title" style="margin:14px 0 8px;">Customer Rating</div>
+              <div class="order-rating-box">
+                <span class="stars-static">${starString(o.rating)}</span>
+                ${o.ratingComment ? `<div class="order-rating-comment">"${o.ratingComment}"</div>` : ''}
+              </div>
+            ` : ''}
             ${Array.isArray(o.statusLog) && o.statusLog.length ? `
               <div class="section-title" style="margin:14px 0 8px;">Notes Sent to Customer</div>
               ${o.statusLog.map((entry, idx) => `
@@ -455,6 +463,12 @@ function render(){
       </div>
     `;
   }).join('');
+}
+
+// Renders a 1-5 rating as filled/empty star glyphs for display only.
+function starString(rating){
+  const n = Math.max(0, Math.min(5, Math.round(rating || 0)));
+  return '★'.repeat(n) + '☆'.repeat(5 - n);
 }
 
 function statusLabel(status){
@@ -598,6 +612,13 @@ function applyStatusChange(orderNumber, status, message){
   const order = orders.find(o => o.orderNumber === orderNumber);
   if(!order) return;
   order.status = status;
+  // completedAt is tracked separately from statusLog (which only gets an
+  // entry when there's a message) so the rating window on My Orders and
+  // the "units sold" math on the Statistics page both have a reliable
+  // timestamp to work from.
+  if(status === 'completed'){
+    order.completedAt = new Date().toISOString();
+  }
   if(message){
     if(!Array.isArray(order.statusLog)) order.statusLog = [];
     order.statusLog.push({ status, message, date: new Date().toISOString() });
@@ -608,6 +629,7 @@ function applyStatusChange(orderNumber, status, message){
 
   if(FIREBASE_ENABLED){
     const payload = { status };
+    if(status === 'completed') payload.completedAt = order.completedAt;
     if(message) payload.statusLog = order.statusLog || [];
     ordersCollection().doc(orderNumber).update(payload)
       .catch(e=>{

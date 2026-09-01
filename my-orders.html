@@ -12,7 +12,7 @@
 <script src="firebase-config.js"></script>
 <style>
   /* Small, page-specific styles — everything else borrows the storefront's look. */
-  #my-orders-app{max-width:480px;margin:0 auto;min-height:100vh;background:var(--bg);padding-bottom:40px;}
+  #my-orders-app{max-width:480px;margin:0 auto;min-height:100vh;background:var(--bg);padding-bottom:calc(100px + env(safe-area-inset-bottom));}
   .mo-section{padding:16px;}
   .mo-signin-card{
     background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);
@@ -57,6 +57,26 @@
   .mo-total-line{display:flex;justify-content:space-between;font-size:13.5px;font-weight:800;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);}
   .mo-empty{color:var(--muted);font-size:13.5px;text-align:center;padding:40px 20px;}
   .mo-note{font-size:12px;color:var(--muted);text-align:center;padding:20px;line-height:1.5;}
+  .mo-rate-box{
+    margin-top:12px;padding-top:12px;border-top:1px solid var(--border);
+  }
+  .mo-rate-label{font-size:12.5px;font-weight:700;margin-bottom:6px;}
+  .mo-star-row{display:flex;gap:2px;}
+  .mo-star{
+    font-size:26px;line-height:1;color:#ddd2c2;background:none;border:none;padding:2px;cursor:pointer;
+  }
+  .mo-star.filled{color:#e0a41a;}
+  .mo-rate-comment{
+    width:100%;margin-top:8px;border:1.5px solid var(--border);border-radius:9px;
+    padding:8px 10px;font-size:13px;font-family:inherit;resize:vertical;min-height:44px;box-sizing:border-box;
+  }
+  .mo-rate-submit{margin-top:8px;width:100%;}
+  .mo-rated-box{
+    margin-top:12px;padding-top:12px;border-top:1px solid var(--border);
+  }
+  .mo-rated-stars{font-size:18px;color:#e0a41a;letter-spacing:1px;}
+  .mo-rated-comment{font-size:12.5px;color:var(--muted);margin-top:4px;font-style:italic;line-height:1.4;}
+  .mo-rated-thanks{font-size:12px;color:var(--muted);margin-top:2px;}
 </style>
 </head>
 <body>
@@ -105,8 +125,8 @@
   <span class="bottom-nav-item active">
     <i class="fa-solid fa-receipt"></i><span>My Orders</span>
   </span>
-  <a class="bottom-nav-item" href="index.html#faq">
-    <i class="fa-solid fa-circle-question"></i><span>FAQ</span>
+  <a class="bottom-nav-item" href="index.html#location">
+    <i class="fa-solid fa-location-dot"></i><span>Visit Us</span>
   </a>
   <a class="bottom-nav-item" href="index.html#account">
     <span class="bottom-nav-avatar" id="bottom-nav-avatar"><i class="fa-solid fa-circle-user"></i></span>
@@ -294,9 +314,87 @@ function renderOrders(orders){
         ` : ''}
         <div class="mo-items">${itemsHtml}</div>
         <div class="mo-total-line"><span>Total</span><span>${money(o.total)}</span></div>
+        ${ratingSectionHtml(o, status)}
       </div>
     `;
   }).join('');
+}
+
+/* ======================= RATING ======================= */
+const RATING_WINDOW_DAYS = 30; // how long after completion the "Rate this order" prompt stays up
+let ratingSelections = {}; // orderNumber -> stars picked but not yet submitted
+
+function daysSince(iso){
+  if(!iso) return Infinity;
+  return (Date.now() - new Date(iso).getTime()) / 86400000;
+}
+
+// Decides whether an order gets an already-rated summary, an open rating
+// prompt, or nothing (not completed yet, or the 30-day window has closed).
+function ratingSectionHtml(o, status){
+  if(o.rating){
+    return `
+      <div class="mo-rated-box" onclick="event.stopPropagation();">
+        <div class="mo-rate-label">Your rating</div>
+        <div class="mo-rated-stars">${'★'.repeat(o.rating)}${'☆'.repeat(5-o.rating)}</div>
+        ${o.ratingComment ? `<div class="mo-rated-comment">"${o.ratingComment}"</div>` : ''}
+      </div>
+    `;
+  }
+  if(status !== 'completed') return '';
+  // Falls back to when the order was placed if completedAt is missing
+  // (older orders, from before rating existed), so the prompt still closes
+  // eventually rather than staying open forever.
+  const since = daysSince(o.completedAt || o.dateISO);
+  if(since > RATING_WINDOW_DAYS) return '';
+
+  const sel = ratingSelections[o.orderNumber] || 0;
+  const stars = [1,2,3,4,5].map(n => `
+    <button type="button" class="mo-star${n<=sel ? ' filled':''}" data-n="${n}"
+      onclick="event.stopPropagation(); selectStars('${o.orderNumber}', ${n})">★</button>
+  `).join('');
+
+  return `
+    <div class="mo-rate-box" onclick="event.stopPropagation();">
+      <div class="mo-rate-label">Rate this order</div>
+      <div class="mo-star-row" id="mo-stars-${o.orderNumber}">${stars}</div>
+      <textarea class="mo-rate-comment" id="mo-comment-${o.orderNumber}" rows="2" placeholder="Add a comment (optional)"></textarea>
+      <button class="btn btn-primary mo-rate-submit" onclick="event.stopPropagation(); submitRating('${o.orderNumber}')">Submit Rating</button>
+    </div>
+  `;
+}
+
+function selectStars(orderNumber, n){
+  ratingSelections[orderNumber] = n;
+  const row = document.getElementById('mo-stars-' + orderNumber);
+  if(!row) return;
+  row.querySelectorAll('.mo-star').forEach(btn=>{
+    btn.classList.toggle('filled', Number(btn.dataset.n) <= n);
+  });
+}
+
+function submitRating(orderNumber){
+  const stars = ratingSelections[orderNumber] || 0;
+  if(stars < 1){
+    showToast('Pick a star rating first');
+    return;
+  }
+  const commentEl = document.getElementById('mo-comment-' + orderNumber);
+  const comment = commentEl ? commentEl.value.trim() : '';
+
+  db.collection('orders').doc(orderNumber).update({
+    rating: stars,
+    ratingComment: comment,
+    ratedAt: new Date().toISOString()
+  }).then(()=>{
+    showToast('Thanks for rating your order!');
+    delete ratingSelections[orderNumber];
+    // The live onSnapshot subscription re-renders this card with the
+    // "Your rating" summary once the write lands — no manual re-render needed.
+  }).catch(e=>{
+    console.error('Could not save rating', e);
+    showToast("Couldn't save your rating — please try again");
+  });
 }
 
 let toastTimer;

@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Statistics — My Restaurant</title>
+<link rel="stylesheet" href="admin.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="firebase-config.js"></script>
+</head>
+<body>
+
+<!-- ============== LOGIN SCREEN — identical pattern to orders.html/admin.html,
+     same admin account. ============== -->
+<div id="login-screen" class="login-wrap">
+  <div class="login-card">
+    <h2>Statistics</h2>
+
+    <div id="login-firebase">
+      <p>Sign in with your admin account to view statistics.</p>
+      <input type="email" id="login-email" placeholder="Email" autocomplete="username">
+      <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+      <div class="login-error" id="login-error"></div>
+      <button class="btn btn-primary btn-block" onclick="attemptLogin()">Log In</button>
+      <button class="link-btn" style="margin-top:10px;width:100%;text-align:center;" onclick="forgotPassword()">Forgot password?</button>
+      <div class="login-note">
+        Same account as the menu admin page — manage it (or change your
+        password) from admin.html once logged in.
+      </div>
+    </div>
+
+    <div id="login-legacy" hidden>
+      <p>Enter the admin password to view statistics.</p>
+      <input type="password" id="login-password-legacy" placeholder="Password" autocomplete="current-password">
+      <div class="login-error" id="login-error-legacy">Incorrect password.</div>
+      <button class="btn btn-primary btn-block" onclick="attemptLegacyLogin()">Log In</button>
+      <div class="login-note" style="color:#b23b3b;">
+        <i class="fa-solid fa-triangle-exclamation"></i> Firebase isn't configured, so this page is using a weak, insecure
+        client-side password. Fill in firebase-config.js and set up Firebase
+        Authentication for real login security.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============== STATS APP (hidden until logged in) ============== -->
+<div id="app" hidden>
+
+  <div class="topbar">
+    <button class="menu-toggle" onclick="openSidebar()" aria-label="Open menu"><i class="fa-solid fa-bars"></i></button>
+    <h1>Statistics</h1>
+    <span class="sync-badge" id="sync-badge">Checking sync…</span>
+  </div>
+
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-title">Statistics</span>
+      <button class="sidebar-close" onclick="closeSidebar()" aria-label="Close menu">×</button>
+    </div>
+    <div class="sidebar-links">
+      <a class="sidebar-link" href="admin.html"><i class="fa-solid fa-clipboard-list"></i> Menu Admin</a>
+      <a class="sidebar-link" href="orders.html"><i class="fa-solid fa-receipt"></i> Orders</a>
+      <span class="sidebar-link current"><i class="fa-solid fa-chart-line"></i> Statistics</span>
+      <a class="sidebar-link" href="index.html" target="_blank"><i class="fa-solid fa-arrow-up-right-from-square"></i> View Store</a>
+    </div>
+    <div class="sidebar-footer">
+      <button class="sidebar-link logout" onclick="logOut()">Log Out</button>
+    </div>
+  </nav>
+
+  <div class="section">
+    <div class="card" id="badge-toggle-card">
+      <div class="avail-toggle">
+        <input type="checkbox" id="best-seller-toggle" checked onchange="toggleBestSellersEnabled(this.checked)">
+        <label for="best-seller-toggle" style="margin:0;">Show Best Seller badges on storefront</label>
+      </div>
+    </div>
+    <div class="stat-cards" id="stat-summary-cards"></div>
+    <div id="stat-categories"></div>
+    <p class="stat-publish-note" id="stat-publish-note"></p>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ========================================================
+   FALLBACK PASSWORD — same as orders.html/admin.html.
+   ======================================================== */
+const ADMIN_PASSWORD_FALLBACK = "admin123";
+
+/* Must match the keys used elsewhere in the project exactly. */
+const PRODUCTS_STORAGE_KEY = "myresto_products_v1";
+const ORDERS_STORAGE_KEY   = "myresto_orders_v1";
+const BEST_SELLERS_ENABLED_KEY = "myresto_bestsellers_enabled_v1";
+
+// Kept identical to the storefront's built-in defaults, same as admin.html.
+const DEFAULT_PRODUCTS = [
+  {
+    id:"chicken-inasal", name:"Chicken Inasal", description:"Grilled Filipino-style chicken",
+    images:["https://picsum.photos/seed/chicken-inasal-1/500/500"],
+    sizes:[ {name:"Regular", price:230}, {name:"Large", price:280} ],
+    category:"Meals", available:true
+  },
+  {
+    id:"carbonara", name:"Carbonara", description:"Creamy classic pasta",
+    images:["https://picsum.photos/seed/carbonara-1/500/500"],
+    sizes:[ {name:"Solo", price:220}, {name:"Sharing", price:340} ],
+    category:"Meals", available:true
+  },
+  {
+    id:"sisig", name:"Sisig", description:"Sizzling chopped pork",
+    images:["https://picsum.photos/seed/sisig-1/500/500"],
+    sizes:[ {name:"Regular", price:210}, {name:"Large", price:260} ],
+    category:"Meals", available:true
+  },
+  {
+    id:"halo-halo", name:"Halo-Halo", description:"Mixed shaved ice dessert",
+    images:["https://picsum.photos/seed/halo-halo-1/500/500"],
+    sizes:[ {name:"Regular", price:120} ],
+    category:"Desserts", available:true
+  },
+  {
+    id:"iced-tea", name:"Iced Tea", description:"House-blend iced tea",
+    images:["https://picsum.photos/seed/iced-tea-1/500/500"],
+    sizes:[ {name:"16oz", price:60}, {name:"22oz", price:80} ],
+    category:"Drinks", available:true
+  }
+];
+
+const FIREBASE_ENABLED = typeof FIREBASE_CONFIG !== 'undefined' &&
+  !!FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('YOUR_');
+
+let db = null, auth = null;
+if(FIREBASE_ENABLED){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  db = firebase.firestore();
+  auth = firebase.auth();
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+}
+function storeDoc(){ return db.collection('stores').doc('main'); }
+function ordersCollection(){ return db.collection('orders'); }
+
+function updateSyncBadge(){
+  const el = document.getElementById('sync-badge');
+  if(!el) return;
+  if(FIREBASE_ENABLED){
+    el.innerHTML = '<i class="fa-solid fa-cloud"></i> Cloud sync on';
+    el.classList.add('on'); el.classList.remove('off');
+  } else {
+    el.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Local only';
+    el.classList.add('off'); el.classList.remove('on');
+    el.title = "Only orders placed on this device/browser are counted. Fill in firebase-config.js to see every order.";
+  }
+}
+
+/* ======================= SIDEBAR ======================= */
+function openSidebar(){
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sidebar-overlay').classList.add('show');
+}
+function closeSidebar(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('show');
+}
+document.addEventListener('keydown', e=>{
+  if(e.key === 'Escape') closeSidebar();
+});
+
+/* ======================= LOGIN — same pattern as orders.html ======================= */
+(function initLoginMode(){
+  document.getElementById('login-firebase').hidden = !FIREBASE_ENABLED;
+  document.getElementById('login-legacy').hidden = FIREBASE_ENABLED;
+})();
+
+if(FIREBASE_ENABLED){
+  auth.onAuthStateChanged(user=>{
+    if(user){
+      document.getElementById('login-screen').hidden = true;
+      document.getElementById('app').hidden = false;
+      boot();
+    } else {
+      document.getElementById('app').hidden = true;
+      document.getElementById('login-screen').hidden = false;
+    }
+  });
+}
+
+function attemptLogin(){
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  if(!email || !password){ errEl.textContent = 'Enter your email and password.'; errEl.style.display = 'block'; return; }
+  auth.signInWithEmailAndPassword(email, password)
+    .catch(e=>{ errEl.textContent = friendlyAuthError(e); errEl.style.display = 'block'; });
+}
+document.getElementById('login-password').addEventListener('keydown', e=>{
+  if(e.key === 'Enter') attemptLogin();
+});
+document.getElementById('login-password-legacy').addEventListener('keydown', e=>{
+  if(e.key === 'Enter') attemptLegacyLogin();
+});
+
+function forgotPassword(){
+  const email = document.getElementById('login-email').value.trim();
+  const errEl = document.getElementById('login-error');
+  if(!email){ errEl.textContent = 'Enter your email above first, then tap "Forgot password?" again.'; errEl.style.display = 'block'; return; }
+  auth.sendPasswordResetEmail(email)
+    .then(()=>{ errEl.style.color = '#1e7a3d'; errEl.textContent = `Password reset email sent to ${email}.`; errEl.style.display = 'block'; })
+    .catch(e=>{ errEl.style.color = ''; errEl.textContent = friendlyAuthError(e); errEl.style.display = 'block'; });
+}
+
+function friendlyAuthError(e){
+  switch(e.code){
+    case 'auth/invalid-email': return 'That email address doesn\'t look right.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential': return 'Incorrect email or password.';
+    case 'auth/too-many-requests': return 'Too many attempts — please wait a bit and try again.';
+    default: return e.message || 'Something went wrong. Please try again.';
+  }
+}
+
+function attemptLegacyLogin(){
+  const val = document.getElementById('login-password-legacy').value;
+  if(val === ADMIN_PASSWORD_FALLBACK){
+    document.getElementById('login-screen').hidden = true;
+    document.getElementById('app').hidden = false;
+    boot();
+  } else {
+    document.getElementById('login-error-legacy').style.display = 'block';
+  }
+}
+
+function logOut(){
+  if(FIREBASE_ENABLED){
+    auth.signOut();
+  } else {
+    document.getElementById('app').hidden = true;
+    document.getElementById('login-screen').hidden = false;
+    document.getElementById('login-password-legacy').value = '';
+    document.getElementById('login-error-legacy').style.display = 'none';
+  }
+}
+
+/* ======================= LOAD ======================= */
+function loadProductsLocal(){
+  try{
+    const raw = localStorage.getItem(PRODUCTS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return (Array.isArray(parsed) && parsed.length) ? parsed : DEFAULT_PRODUCTS;
+  }catch(e){ return DEFAULT_PRODUCTS; }
+}
+function loadOrdersLocal(){
+  try{
+    const raw = localStorage.getItem(ORDERS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(e){ return []; }
+}
+// Defaults to true so badges keep showing for anyone who already had them
+// on before this toggle existed.
+function loadBestSellersEnabledLocal(){
+  try{
+    const raw = localStorage.getItem(BEST_SELLERS_ENABLED_KEY);
+    return raw === null ? true : raw === 'true';
+  }catch(e){ return true; }
+}
+
+let PRODUCTS = [];
+let ORDERS = [];
+let bestSellersEnabled = true;
+
+async function boot(){
+  updateSyncBadge();
+  PRODUCTS = loadProductsLocal();
+  ORDERS = loadOrdersLocal();
+  bestSellersEnabled = loadBestSellersEnabledLocal();
+  document.getElementById('best-seller-toggle').checked = bestSellersEnabled;
+  renderStats();
+
+  if(FIREBASE_ENABLED){
+    storeDoc().onSnapshot(snap=>{
+      const data = snap.data();
+      if(data && Array.isArray(data.products) && data.products.length){
+        PRODUCTS = data.products;
+        renderStats();
+      }
+      if(data && typeof data.bestSellersEnabled === 'boolean' && data.bestSellersEnabled !== bestSellersEnabled){
+        bestSellersEnabled = data.bestSellersEnabled;
+        document.getElementById('best-seller-toggle').checked = bestSellersEnabled;
+        try{ localStorage.setItem(BEST_SELLERS_ENABLED_KEY, String(bestSellersEnabled)); }catch(e){}
+      }
+    }, err=>console.error('Could not load products', err));
+
+    // Unlimited (unlike orders.html's live list) — best-seller and revenue
+    // totals need every completed order, not just the most recent ones.
+    ordersCollection().onSnapshot(snap=>{
+      ORDERS = snap.docs.map(d => d.data());
+      renderStats();
+    }, err=>{
+      console.error('Order sync error:', err);
+      showToast("Couldn't reach cloud storage — showing the local copy");
+    });
+  }
+}
+
+// Admin-controlled on/off switch for the storefront badge. The stats page
+// itself keeps showing Best Seller rankings either way — this only
+// controls whether index.html displays the badge to customers.
+function toggleBestSellersEnabled(checked){
+  bestSellersEnabled = checked;
+  try{ localStorage.setItem(BEST_SELLERS_ENABLED_KEY, String(checked)); }catch(e){}
+  const note = document.getElementById('stat-publish-note');
+  if(!FIREBASE_ENABLED){
+    if(note) note.textContent = checked
+      ? "Badges are on, but need cloud sync (Firebase) to show up for other visitors."
+      : "Badges are off for this device. (No cloud sync configured yet.)";
+    return;
+  }
+  storeDoc().set({ bestSellersEnabled: checked }, { merge: true })
+    .then(()=> showToast(checked ? 'Best Seller badges turned on' : 'Best Seller badges turned off'))
+    .catch(e=>{
+      console.error('Could not save badge setting', e);
+      showToast("Couldn't save that setting — please try again");
+    });
+}
+
+/* ======================= STATS COMPUTATION ======================= */
+function money(n){ return "₱" + Number(n||0).toLocaleString('en-PH'); }
+
+function computeStats(){
+  // Only orders the kitchen actually fulfilled count as "sold" — pending/
+  // approved orders haven't happened yet, and cancelled ones didn't happen.
+  const completed = ORDERS.filter(o => o.status === 'completed');
+
+  const soldByProduct = {}; // productId -> { qty, revenue, name, category }
+  completed.forEach(o=>{
+    (o.items || []).forEach(it=>{
+      const key = it.productId || it.name;
+      if(!soldByProduct[key]){
+        const product = PRODUCTS.find(p => p.id === it.productId);
+        soldByProduct[key] = {
+          qty: 0, revenue: 0,
+          name: it.name,
+          category: product ? product.category : 'Other'
+        };
+      }
+      soldByProduct[key].qty += (it.qty || 0);
+      soldByProduct[key].revenue += (it.itemTotal || 0);
+    });
+  });
+
+  // Group by every category that exists in the current menu, so categories
+  // with zero sales still show up (empty state), plus an "Other" bucket for
+  // items that were sold but have since been removed from the menu.
+  const categories = [...new Set(PRODUCTS.map(p=>p.category))];
+  if(Object.values(soldByProduct).some(s => s.category === 'Other')) categories.push('Other');
+
+  const byCategory = categories.map(cat=>{
+    const rows = Object.entries(soldByProduct)
+      .filter(([id, s]) => s.category === cat)
+      .map(([id, s]) => ({ id, ...s }))
+      .sort((a,b) => b.qty - a.qty);
+    return { category: cat, rows, bestSellerId: (rows[0] && rows[0].qty > 0) ? rows[0].id : null };
+  });
+
+  const totalRevenue = completed.reduce((sum,o) => sum + (o.total || 0), 0);
+  const totalItemsSold = Object.values(soldByProduct).reduce((sum,s) => sum + s.qty, 0);
+  const rated = ORDERS.filter(o => o.rating);
+  const avgRating = rated.length ? (rated.reduce((sum,o)=>sum+o.rating,0) / rated.length) : null;
+
+  return { byCategory, totalRevenue, totalItemsSold, completedCount: completed.length, avgRating, ratedCount: rated.length };
+}
+
+function renderStats(){
+  const stats = computeStats();
+
+  document.getElementById('stat-summary-cards').innerHTML = `
+    <div class="stat-card"><div class="stat-value">${stats.completedCount}</div><div class="stat-label">Completed Orders</div></div>
+    <div class="stat-card"><div class="stat-value">${money(stats.totalRevenue)}</div><div class="stat-label">Revenue (completed)</div></div>
+    <div class="stat-card"><div class="stat-value">${stats.totalItemsSold}</div><div class="stat-label">Items Sold</div></div>
+    <div class="stat-card"><div class="stat-value">${stats.avgRating != null ? stats.avgRating.toFixed(1) + ' ★' : '—'}</div><div class="stat-label">Avg Rating (${stats.ratedCount} rated)</div></div>
+  `;
+
+  const catsWrap = document.getElementById('stat-categories');
+  if(!stats.byCategory.length){
+    catsWrap.innerHTML = `<p class="stat-empty">No menu categories yet — add items in Menu Admin first.</p>`;
+  } else {
+    catsWrap.innerHTML = stats.byCategory.map(cat=>{
+      const rowsHtml = cat.rows.length ? cat.rows.map(r => `
+        <div class="stat-row">
+          <div class="stat-row-name">
+            <span class="name-text">${r.name}</span>
+            ${r.id === cat.bestSellerId ? `<span class="best-seller-badge"><i class="fa-solid fa-utensils"></i><span class="bsb-text">Best Seller</span><i class="fa-solid fa-fire"></i></span>` : ''}
+          </div>
+          <span class="stat-row-count">${r.qty} sold · ${money(r.revenue)}</span>
+        </div>
+      `).join('') : `<p class="stat-empty">No completed orders for this category yet.</p>`;
+
+      return `
+        <div class="stat-category-title">${cat.category}</div>
+        <div class="card">${rowsHtml}</div>
+      `;
+    }).join('');
+  }
+
+  publishBestSellers(stats);
+}
+
+// Writes { category -> bestSellerProductId } to the shared store doc so
+// index.html (which already subscribes to that doc) can show a "Best
+// Seller" badge on the storefront without needing to read the orders
+// collection itself.
+let lastPublished = null;
+function publishBestSellers(stats){
+  const map = {};
+  stats.byCategory.forEach(cat=>{
+    if(cat.bestSellerId) map[cat.category] = cat.bestSellerId;
+  });
+  const note = document.getElementById('stat-publish-note');
+
+  if(!FIREBASE_ENABLED){
+    if(note) note.textContent = "Best Seller badges need cloud sync (Firebase) to show up on the storefront for other visitors.";
+    return;
+  }
+  const serialized = JSON.stringify(map);
+  if(serialized === lastPublished){
+    if(note) note.textContent = bestSellersEnabled
+      ? 'Best Seller badges on the storefront are kept in sync automatically.'
+      : 'Best Seller badges are currently turned off on the storefront.';
+    return; // nothing changed, skip the write
+  }
+  lastPublished = serialized;
+
+  storeDoc().set({ bestSellers: map }, { merge: true })
+    .then(()=>{
+      if(note) note.textContent = bestSellersEnabled
+        ? 'Best Seller badges on the storefront are kept in sync automatically.'
+        : 'Best Seller badges are currently turned off on the storefront.';
+    })
+    .catch(e=>{
+      console.error('Could not publish best sellers', e);
+      if(note) note.textContent = "Couldn't publish Best Seller badges to the storefront — will retry automatically.";
+    });
+}
+
+let toastTimer;
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 1800);
+}
+
+// Local-only mode (no Firebase): nothing to subscribe to, so just render
+// once from whatever's cached in this browser.
+if(!FIREBASE_ENABLED){
+  document.getElementById('login-firebase').hidden = true;
+  document.getElementById('login-legacy').hidden = false;
+}
+</script>
+</body>
+</html>

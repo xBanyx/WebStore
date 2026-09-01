@@ -154,15 +154,15 @@
   <!-- SUCCESS / RECEIPT VIEW -->
   <main id="success-view" hidden>
     <div class="success-header">
-      <div class="success-check"><i class="fa-solid fa-check"></i></div>
-      <h2>PLEASE SAVE THIS RECEIPT AND SEND IT TO THE STORE</h2>
+      <div class="success-check"><i class="fa-solid fa-hourglass-half"></i></div>
+      <h2 id="success-thanks"></h2>
       <p id="success-sub"></p>
     </div>
 
     <div id="receipt-mount"></div>
 
     <div class="send-note">
-      PLEASE SAVE THIS RECEIPT AND<br>SEND IT TO THE STORE
+      Please save &amp; download this receipt and send it to the store.
     </div>
 
     <div class="success-actions">
@@ -196,23 +196,18 @@
     <div id="faq-list"></div>
   </main>
 
-  <!-- "VISIT US" VIEW — reached from the bottom nav. Static map preview
-       (OpenStreetMap, no API key needed) built from RESTAURANT_CONFIG's
-       shopLat/shopLng — the same pin already used for delivery pricing.
-       Tapping it (or the button under it) opens RESTAURANT_CONFIG.mapsUrl,
-       your real Google Maps listing, set in admin.html. -->
+  <!-- "VISIT US" VIEW — reached from the bottom nav. Live Google Maps
+       embed (RESTAURANT_CONFIG.mapsEmbedUrl, set in admin.html via
+       Google Maps → Share → Embed a map — free, no API key/billing,
+       and official Google infrastructure so it won't randomly go down
+       like third-party static map services can). -->
   <main id="location-view" hidden>
     <div class="page-header">
       <button class="back-btn" onclick="showView('menu')"><i class="fa-solid fa-arrow-left"></i></button>
       <h2>Visit Us</h2>
     </div>
     <div id="location-map-wrap">
-      <a id="location-map-link" href="#" target="_blank" rel="noopener">
-        <img id="location-map-img" alt="Map showing the store's location">
-      </a>
-      <button class="btn btn-secondary btn-block" id="location-directions-btn" onclick="openFullMap()">
-        <i class="fa-solid fa-diamond-turn-right"></i> Open in Maps
-      </button>
+      <iframe id="location-map-embed" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe>
     </div>
     <p id="location-map-empty" class="field-hint" hidden style="padding:16px;">
       The store hasn't set a map location yet.
@@ -276,6 +271,7 @@ const DEFAULT_RESTAURANT_CONFIG = {
   messengerUrl: "https://m.me/hilda.alto.9",
   phoneNumber: "",
   mapsUrl: "https://maps.app.goo.gl/JqkgXMntFhBrvKMt9",
+  mapsEmbedUrl: "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d65858.1887799595!2d122.48823243021901!3d14.290903031009947!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x33988db2e6473235%3A0x325ecc9160616f0b!2sRHJ%20DINER!5e0!3m2!1sen!2sph!4v1788231599803!5m2!1sen!2sph",
   // Multiple banners now supported — the storefront auto-scrolls through
   // whichever images are in this array. "banner" (singular) is kept as a
   // fallback for any old saved config that predates this feature.
@@ -628,6 +624,31 @@ function normalizeConfig(cfg){
 let PRODUCTS = loadProducts();
 let RESTAURANT_CONFIG = loadConfig();
 
+// { category: productId } — which item is the top seller in each category,
+// computed and published from stats.html. Loaded the same dual way as
+// products/config: a local cache plus live cloud sync below.
+const BEST_SELLERS_STORAGE_KEY = "myresto_bestsellers_v1";
+function loadBestSellers(){
+  try{
+    const raw = localStorage.getItem(BEST_SELLERS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return (parsed && typeof parsed === 'object') ? parsed : {};
+  }catch(e){ return {}; }
+}
+let BEST_SELLERS = loadBestSellers();
+
+// Admin on/off switch (from stats.html) for whether the badge shows at all.
+// Defaults to true so nothing changes for stores that haven't touched the
+// new toggle yet.
+const BEST_SELLERS_ENABLED_KEY = "myresto_bestsellers_enabled_v1";
+function loadBestSellersEnabled(){
+  try{
+    const raw = localStorage.getItem(BEST_SELLERS_ENABLED_KEY);
+    return raw === null ? true : raw === 'true';
+  }catch(e){ return true; }
+}
+let BEST_SELLERS_ENABLED = loadBestSellersEnabled();
+
 /* ======================= STATE ======================= */
 // Cart is a list of line items (not keyed by product id) because the same
 // food can be added multiple times with different sizes/notes.
@@ -880,10 +901,14 @@ function init(){
       let changed = false;
       if(Array.isArray(data.products) && data.products.length){ PRODUCTS = data.products; changed = true; }
       if(data.config){ RESTAURANT_CONFIG = normalizeConfig({ ...DEFAULT_RESTAURANT_CONFIG, ...data.config }); changed = true; }
+      if(data.bestSellers && typeof data.bestSellers === 'object'){ BEST_SELLERS = data.bestSellers; changed = true; }
+      if(typeof data.bestSellersEnabled === 'boolean'){ BEST_SELLERS_ENABLED = data.bestSellersEnabled; changed = true; }
       if(changed){
         try{
           localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(PRODUCTS));
           localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(RESTAURANT_CONFIG));
+          localStorage.setItem(BEST_SELLERS_STORAGE_KEY, JSON.stringify(BEST_SELLERS));
+          localStorage.setItem(BEST_SELLERS_ENABLED_KEY, String(BEST_SELLERS_ENABLED));
         }catch(e){ /* localStorage may be full/unavailable — cloud copy still applies live */ }
         applyConfig();
         renderMenu();
@@ -908,7 +933,7 @@ function init(){
   // Deep-link support — lets other pages (like my-orders.html's bottom
   // nav) link straight into a view with e.g. index.html#account.
   const deepLinkView = (location.hash || '').replace('#', '');
-  if(['faq','account'].includes(deepLinkView)) showView(deepLinkView);
+  if(['account','location'].includes(deepLinkView)) showView(deepLinkView);
 }
 
 function getProduct(id){ return PRODUCTS.find(p=>p.id===id); }
@@ -959,11 +984,10 @@ function toggleFaq(i){
 }
 
 /* ======================= VISIT US (map) ======================= */
-// The static preview image is still built from shopLat/shopLng (free,
-// no API key — OpenStreetMap). The tap-through destination prefers your
-// actual Google Maps share link (set in admin.html) since that points to
-// your real verified listing — falls back to a plain coordinate search if
-// that link hasn't been set.
+// Live Google Maps embed (RESTAURANT_CONFIG.mapsEmbedUrl) — the "Open in
+// Maps" button uses RESTAURANT_CONFIG.mapsUrl, your share link, since
+// that opens better in the actual Google Maps app for real navigation,
+// while the embed itself is just for a quick look on the page.
 function getMapsUrl(){
   const custom = (RESTAURANT_CONFIG.mapsUrl || '').trim();
   if(custom) return custom;
@@ -972,12 +996,12 @@ function getMapsUrl(){
   return `https://www.google.com/maps/search/?api=1&query=${shopLat},${shopLng}`;
 }
 function renderLocation(){
-  const { shopLat, shopLng } = RESTAURANT_CONFIG.delivery || {};
   const wrap = document.getElementById('location-map-wrap');
   const empty = document.getElementById('location-map-empty');
+  const embedUrl = (RESTAURANT_CONFIG.mapsEmbedUrl || '').trim();
   const mapsUrl = getMapsUrl();
 
-  if(shopLat == null || shopLng == null || !mapsUrl){
+  if(!embedUrl){
     wrap.hidden = true;
     empty.hidden = false;
     return;
@@ -985,14 +1009,14 @@ function renderLocation(){
   wrap.hidden = false;
   empty.hidden = true;
 
-  const img = document.getElementById('location-map-img');
-  img.src = `https://staticmap.openstreetmap.de/staticmap.php?center=${shopLat},${shopLng}&zoom=16&size=600x300&markers=${shopLat},${shopLng},red-pushpin`;
-  document.getElementById('location-map-link').href = mapsUrl;
-}
-function openFullMap(){
-  const mapsUrl = getMapsUrl();
-  if(!mapsUrl) return;
-  window.open(mapsUrl, '_blank', 'noopener');
+  document.getElementById('location-map-embed').src = embedUrl;
+  const directionsBtn = document.getElementById('location-directions-btn');
+  if(mapsUrl){
+    directionsBtn.hidden = false;
+    directionsBtn.href = mapsUrl;
+  } else {
+    directionsBtn.hidden = true;
+  }
 }
 
 /* ======================= MENU ======================= */
@@ -1009,10 +1033,14 @@ function renderMenu(){
     list.className='product-list';
     PRODUCTS.filter(p=>p.category===cat && p.available).forEach(p=>{
       const priceLabel = p.sizes.length>1 ? `From ${money(basePrice(p))}` : money(basePrice(p));
+      const isBestSeller = BEST_SELLERS_ENABLED && BEST_SELLERS[p.category] === p.id;
       const card = document.createElement('div');
       card.className='product-card';
       card.innerHTML = `
-        <img src="${p.images[0]}" alt="${p.name}" onclick="openProduct('${p.id}')">
+        <div class="product-img-wrap" onclick="openProduct('${p.id}')">
+          <img src="${p.images[0]}" alt="${p.name}">
+          ${isBestSeller ? `<span class="best-seller-badge"><i class="fa-solid fa-utensils"></i><span class="bsb-text">Best Seller</span><i class="fa-solid fa-fire"></i></span>` : ''}
+        </div>
         <div class="product-info" onclick="openProduct('${p.id}')">
           <h3>${p.name}</h3>
           <p>${p.description}</p>
@@ -1460,8 +1488,10 @@ function saveOrder(order){
 
 /* ======================= SUCCESS + RECEIPT (HTML/CSS) ======================= */
 function renderSuccess(order){
-  document.getElementById('success-sub').textContent =
-    `Thank you, ${order.customerName}! Your order has been received.`;
+  document.getElementById('success-thanks').textContent =
+    `Thank you, ${order.customerName}! Wait for the store to approve your order.`;
+  document.getElementById('success-sub').innerHTML =
+    `To know if your order is approved, the store will send you a message — or check <a href="my-orders.html">My Orders</a>.`;
 
   const dateStr = order.date.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' });
   const timeStr = order.date.toLocaleTimeString('en-PH', { hour:'numeric', minute:'2-digit' });

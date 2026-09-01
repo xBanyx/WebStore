@@ -194,6 +194,57 @@
   .order-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
   .order-actions .btn{flex:1;min-width:110px;padding:9px 8px;font-size:12.5px;}
   #notify-btn{white-space:nowrap;}
+  .order-rating-box{
+    background:#fff8e6;border:1px solid #f0d896;border-radius:9px;
+    padding:8px 10px;margin:4px 0 8px;
+  }
+  .stars-static{color:#e0a41a;font-size:15px;letter-spacing:1px;}
+  .order-rating-comment{font-size:12.5px;color:var(--text);margin-top:4px;font-style:italic;line-height:1.4;}
+
+  /* ---------- Statistics page ---------- */
+  .stat-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;}
+  .stat-card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px;}
+  .stat-card .stat-value{font-size:20px;font-weight:800;}
+  .stat-card .stat-label{font-size:11.5px;color:var(--muted);margin-top:2px;}
+  .stat-category-title{font-size:14px;font-weight:800;margin:18px 0 8px;}
+  .stat-row{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:9px 0;border-bottom:1px solid var(--border);font-size:13px;
+  }
+  .stat-row:last-child{border-bottom:none;}
+  .stat-row-name{display:flex;align-items:center;gap:7px;min-width:0;}
+  .stat-row-name span.name-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .best-seller-badge{
+    display:inline-flex;align-items:center;gap:4px;
+    background:linear-gradient(180deg,#2e2722,#191512);
+    border:1px solid #4a3d31;
+    font-size:10px;font-weight:800;padding:3px 9px;border-radius:20px;white-space:nowrap;flex-shrink:0;
+    animation:badge-flame-glow-admin 1.3s ease-in-out infinite;
+  }
+  .best-seller-badge .bsb-text{
+    background:linear-gradient(180deg,#fff3c4 0%,#ffce54 35%,#ff8a1e 65%,#d9480f 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    animation:text-flame-admin 0.8s ease-in-out infinite alternate;
+  }
+  .best-seller-badge .fa-utensils{color:#ffce54;}
+  .best-seller-badge .fa-fire{color:#ffb03a;animation:flame-flicker-admin 0.9s ease-in-out infinite;}
+  @keyframes badge-flame-glow-admin{
+    0%, 100%{box-shadow:0 1px 3px rgba(0,0,0,.3), 0 0 4px rgba(255,138,30,.3);}
+    50%{box-shadow:0 1px 3px rgba(0,0,0,.3), 0 0 10px rgba(255,138,30,.7), 0 0 4px rgba(217,72,15,.5);}
+  }
+  @keyframes text-flame-admin{
+    0%{filter:brightness(1);}
+    100%{filter:brightness(1.35);}
+  }
+  @keyframes flame-flicker-admin{
+    0%, 100%{transform:scale(1) rotate(-2deg);opacity:1;}
+    25%{transform:scale(0.9) rotate(2deg);opacity:.85;}
+    50%{transform:scale(1.1) rotate(-1deg);opacity:1;}
+    75%{transform:scale(0.95) rotate(1deg);opacity:.9;}
+  }
+  .stat-row-count{color:var(--muted);font-size:12px;white-space:nowrap;flex-shrink:0;}
+  .stat-empty{color:var(--muted);font-size:13px;text-align:center;padding:24px 10px;}
+  .stat-publish-note{font-size:11.5px;color:var(--muted);text-align:center;margin-top:10px;line-height:1.5;}
 
   /* ---------- Account modal ---------- */
   .modal-backdrop{
