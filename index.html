@@ -29,23 +29,7 @@
     <button class="btn btn-secondary btn-block" style="margin-top:10px;" onclick="chooseGuest()">Continue as Guest</button>
   </div>
 </div>
-<!-- Shown to customers in place of the whole storefront while maintenance
-     mode is on. The admin still sees the real menu (see applyMaintenanceState). -->
-<div id="maintenance-screen" hidden>
-  <div class="maintenance-card">
-    <img id="maintenance-logo" alt="">
-    <div class="maintenance-icon"><i class="fa-solid fa-utensils"></i></div>
-    <h2>We'll Be Right Back</h2>
-    <p id="maintenance-message-text">We're doing some quick updates — thanks for your patience!</p>
-  </div>
-</div>
-
 <div id="app">
-
-  <div id="admin-preview-banner" hidden>
-    <i class="fa-solid fa-triangle-exclamation"></i>
-    Maintenance mode is ON — customers see the maintenance page. You're seeing the real menu because you're logged in as admin.
-  </div>
 
   <div class="topbar">
     <div class="brand">
@@ -359,12 +343,14 @@ let db = null;
 let auth = null;
 let currentUser = null; // the signed-in customer, if any — optional, guest checkout still works
 
-// The loading screen (and the sign-in gate right after it) waits on two
-// independent things: the menu data, and — if Firebase is configured —
-// knowing whether the visitor is already signed in. Both run in parallel;
-// we only move on once whichever ones apply have both finished.
+// The loading screen (and the sign-in gate right after it) waits on three
+// independent things: the store config, the menu itself, and — if Firebase
+// is configured — knowing whether the visitor is already signed in. All
+// run in parallel; we only move on once whichever ones apply have all
+// finished.
 let authReady = true;
-let dataReady = false;
+let configReady = false;
+let productsReady = false;
 
 if(FIREBASE_ENABLED){
   authReady = false;
@@ -448,36 +434,14 @@ function updateOrdersBadge(myOrders){
 }
 
 function dataFinishedLoading(){
-  dataReady = true;
+  configReady = true;
+  productsReady = true;
   tryFinishBoot();
 }
 function tryFinishBoot(){
-  if(!dataReady || !authReady) return;
+  if(!configReady || !productsReady || !authReady) return;
   hideLoadingScreen();
-  applyMaintenanceState();
-  if(!(MAINTENANCE_STATE.enabled && !isAdminBypass())) maybeShowGate();
-}
-
-/* ======================= MAINTENANCE MODE ======================= */
-// Shows the full-screen maintenance page to everyone except whoever's
-// currently logged into an admin panel on this same browser (admin.html,
-// orders.html, or stats.html all set the same flag on login).
-function applyMaintenanceState(){
-  const bypass = isAdminBypass();
-  const showMaintenance = MAINTENANCE_STATE.enabled && !bypass;
-
-  document.getElementById('maintenance-screen').hidden = !showMaintenance;
-  document.getElementById('app').hidden = showMaintenance;
-  if(showMaintenance) document.getElementById('gate-screen').hidden = true;
-
-  if(showMaintenance){
-    const logo = document.getElementById('maintenance-logo');
-    if(RESTAURANT_CONFIG.logo){ logo.src = RESTAURANT_CONFIG.logo; logo.classList.add('show'); }
-    document.getElementById('maintenance-message-text').textContent =
-      MAINTENANCE_STATE.message || "We're doing some quick updates — thanks for your patience!";
-  }
-
-  document.getElementById('admin-preview-banner').hidden = !(MAINTENANCE_STATE.enabled && bypass);
+  maybeShowGate();
 }
 
 /* ======================= SIGN-IN GATE =======================
@@ -579,63 +543,17 @@ function updateSignInUI(){
 //  - sizes: one or more { name, price } options shown in the add-to-cart popup
 // These are the built-in defaults used until an admin adds/edits items in
 // admin.html — at that point the saved copy in shared storage takes over.
-const DEFAULT_PRODUCTS = [
-  {
-    id:"chicken-inasal", name:"Chicken Inasal", description:"Grilled Filipino-style chicken",
-    images:[
-      "https://picsum.photos/seed/chicken-inasal-1/500/500",
-      "https://picsum.photos/seed/chicken-inasal-2/500/500",
-      "https://picsum.photos/seed/chicken-inasal-3/500/500"
-    ],
-    sizes:[ {name:"Regular", price:230}, {name:"Large", price:280} ],
-    category:"Meals", available:true
-  },
-  {
-    id:"carbonara", name:"Carbonara", description:"Creamy classic pasta",
-    images:[
-      "https://picsum.photos/seed/carbonara-1/500/500",
-      "https://picsum.photos/seed/carbonara-2/500/500"
-    ],
-    sizes:[ {name:"Solo", price:220}, {name:"Sharing", price:340} ],
-    category:"Meals", available:true
-  },
-  {
-    id:"sisig", name:"Sisig", description:"Sizzling chopped pork",
-    images:[
-      "https://picsum.photos/seed/sisig-1/500/500",
-      "https://picsum.photos/seed/sisig-2/500/500",
-      "https://picsum.photos/seed/sisig-3/500/500"
-    ],
-    sizes:[ {name:"Regular", price:210}, {name:"Large", price:260} ],
-    category:"Meals", available:true
-  },
-  {
-    id:"halo-halo", name:"Halo-Halo", description:"Mixed shaved ice dessert",
-    images:[
-      "https://picsum.photos/seed/halo-halo-1/500/500",
-      "https://picsum.photos/seed/halo-halo-2/500/500"
-    ],
-    sizes:[ {name:"Regular", price:120} ],
-    category:"Desserts", available:true
-  },
-  {
-    id:"iced-tea", name:"Iced Tea", description:"House-blend iced tea",
-    images:[
-      "https://picsum.photos/seed/iced-tea-1/500/500",
-      "https://picsum.photos/seed/iced-tea-2/500/500"
-    ],
-    sizes:[ {name:"16oz", price:60}, {name:"22oz", price:80} ],
-    category:"Drinks", available:true
-  }
-];
-
 /* ======================= LIVE DATA (synced with admin.html) ======================= */
 function loadProducts(){
   try{
     const raw = localStorage.getItem(PRODUCTS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    return (Array.isArray(parsed) && parsed.length) ? parsed : DEFAULT_PRODUCTS;
-  }catch(e){ return DEFAULT_PRODUCTS; }
+    // No sample/default items on the storefront — if nothing's been saved
+    // yet (a brand-new store, or the real menu just hasn't synced from
+    // Firestore yet), show nothing rather than fake placeholder food.
+    // See renderMenu() for the "please wait" message shown in that case.
+    return (Array.isArray(parsed) && parsed.length) ? parsed : [];
+  }catch(e){ return []; }
 }
 function loadConfig(){
   try{
@@ -687,26 +605,6 @@ function loadBestSellersEnabled(){
   }catch(e){ return true; }
 }
 let BEST_SELLERS_ENABLED = loadBestSellersEnabled();
-
-// Maintenance mode — set from admin.html, mirrors the same doc/local-storage
-// pattern as everything else above. { enabled, message } as one JSON blob
-// so it always loads/saves as a matched pair.
-const MAINTENANCE_STORAGE_KEY = "myresto_maintenance_v1";
-const ADMIN_SESSION_KEY = "myresto_admin_session_v1"; // set by admin.html/orders.html/stats.html on login
-function loadMaintenanceState(){
-  try{
-    const raw = localStorage.getItem(MAINTENANCE_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    return {
-      enabled: !!(parsed && parsed.enabled),
-      message: (parsed && typeof parsed.message === 'string') ? parsed.message : ""
-    };
-  }catch(e){ return { enabled:false, message:"" }; }
-}
-let MAINTENANCE_STATE = loadMaintenanceState();
-function isAdminBypass(){
-  try{ return localStorage.getItem(ADMIN_SESSION_KEY) === '1'; }catch(e){ return false; }
-}
 
 /* ======================= STATE ======================= */
 // Cart is a list of line items (not keyed by product id) because the same
@@ -947,41 +845,68 @@ function init(){
     }
   });
 
-  // Live cloud sync: every visitor subscribes to the same document, so menu
+  // Live cloud sync: every visitor subscribes to the same data, so menu
   // edits made in admin.html show up here automatically — no reload needed,
   // and it's no longer limited to the admin's own browser.
+  //
+  // Products live in their own Firestore collection (one document per
+  // item) rather than as one big array on the store's config document —
+  // that's what lets the menu grow without ever hitting Firestore's 1MB
+  // per-document size cap, no matter how many product photos get added.
+  // legacyProductsFallback exists purely for the transition period: a
+  // store that hasn't had anyone log into the upgraded admin.html yet
+  // still has its whole menu sitting in the old stores/main "products"
+  // field, so we show that instead of an empty menu until the real
+  // per-product collection has something in it.
+  let legacyProductsFallback = null;
+
+  function applyProducts(items){
+    if(!items.length) return false;
+    PRODUCTS = items;
+    try{ localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(PRODUCTS)); }catch(e){ /* localStorage may be full/unavailable — cloud copy still applies live */ }
+    renderMenu();
+    return true;
+  }
+
   if(FIREBASE_ENABLED){
     // Don't leave visitors staring at the loading screen forever if the
     // network is slow or Firestore never responds.
     setTimeout(()=>{ authReady = true; dataFinishedLoading(); }, 4000);
+
     storeDoc().onSnapshot(snap=>{
-      if(!snap.exists){ dataFinishedLoading(); return; }
-      const data = snap.data();
-      let changed = false;
-      if(Array.isArray(data.products) && data.products.length){ PRODUCTS = data.products; changed = true; }
-      if(data.config){ RESTAURANT_CONFIG = normalizeConfig({ ...DEFAULT_RESTAURANT_CONFIG, ...data.config }); changed = true; }
-      if(data.bestSellers && typeof data.bestSellers === 'object'){ BEST_SELLERS = data.bestSellers; changed = true; }
-      if(typeof data.bestSellersEnabled === 'boolean'){ BEST_SELLERS_ENABLED = data.bestSellersEnabled; changed = true; }
-      let maintenanceChanged = false;
-      if(typeof data.maintenanceMode === 'boolean' && data.maintenanceMode !== MAINTENANCE_STATE.enabled){
-        MAINTENANCE_STATE.enabled = data.maintenanceMode; maintenanceChanged = true;
+      if(snap.exists){
+        const data = snap.data();
+        let changed = false;
+        if(data.config){ RESTAURANT_CONFIG = normalizeConfig({ ...DEFAULT_RESTAURANT_CONFIG, ...data.config }); changed = true; }
+        if(data.bestSellers && typeof data.bestSellers === 'object'){ BEST_SELLERS = data.bestSellers; changed = true; }
+        if(typeof data.bestSellersEnabled === 'boolean'){ BEST_SELLERS_ENABLED = data.bestSellersEnabled; changed = true; }
+        if(Array.isArray(data.products) && data.products.length){
+          legacyProductsFallback = data.products;
+          if(!PRODUCTS.length) applyProducts(legacyProductsFallback);
+        }
+        if(changed){
+          try{
+            localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(RESTAURANT_CONFIG));
+            localStorage.setItem(BEST_SELLERS_STORAGE_KEY, JSON.stringify(BEST_SELLERS));
+            localStorage.setItem(BEST_SELLERS_ENABLED_KEY, String(BEST_SELLERS_ENABLED));
+          }catch(e){ /* localStorage may be full/unavailable — cloud copy still applies live */ }
+          applyConfig();
+        }
       }
-      if(typeof data.maintenanceMessage === 'string' && data.maintenanceMessage !== MAINTENANCE_STATE.message){
-        MAINTENANCE_STATE.message = data.maintenanceMessage; maintenanceChanged = true;
+      configReady = true;
+      tryFinishBoot();
+    }, err=>{ console.error('Store sync error:', err); configReady = true; tryFinishBoot(); });
+
+    db.collection('products').onSnapshot(snap=>{
+      const items = snap.docs.map(d => d.data()).sort((a,b)=>(a.order||0)-(b.order||0));
+      // The real per-product collection always wins once it has anything;
+      // only fall back to the legacy array if the collection is still empty.
+      if(!applyProducts(items) && legacyProductsFallback){
+        applyProducts(legacyProductsFallback);
       }
-      if(changed || maintenanceChanged){
-        try{
-          localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(PRODUCTS));
-          localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(RESTAURANT_CONFIG));
-          localStorage.setItem(BEST_SELLERS_STORAGE_KEY, JSON.stringify(BEST_SELLERS));
-          localStorage.setItem(BEST_SELLERS_ENABLED_KEY, String(BEST_SELLERS_ENABLED));
-          localStorage.setItem(MAINTENANCE_STORAGE_KEY, JSON.stringify(MAINTENANCE_STATE));
-        }catch(e){ /* localStorage may be full/unavailable — cloud copy still applies live */ }
-        if(changed){ applyConfig(); renderMenu(); }
-        if(maintenanceChanged) applyMaintenanceState();
-      }
-      dataFinishedLoading();
-    }, err=>{ console.error('Store sync error:', err); dataFinishedLoading(); });
+      productsReady = true;
+      tryFinishBoot();
+    }, err=>{ console.error('Products sync error:', err); productsReady = true; tryFinishBoot(); });
   } else {
     // No cloud configured — local/default data is already rendered above.
     dataFinishedLoading();
@@ -1090,6 +1015,12 @@ function renderLocation(){
 function renderMenu(){
   const wrap = document.getElementById('menu-categories');
   wrap.innerHTML = '';
+
+  if(!PRODUCTS.length){
+    wrap.innerHTML = `<p class="menu-empty-note">Note: Please wait for it to load.</p>`;
+    return;
+  }
+
   const categories = [...new Set(PRODUCTS.map(p=>p.category))];
   categories.forEach(cat=>{
     const title = document.createElement('div');
@@ -1556,9 +1487,9 @@ function saveOrder(order){
 /* ======================= SUCCESS + RECEIPT (HTML/CSS) ======================= */
 function renderSuccess(order){
   document.getElementById('success-thanks').textContent =
-    `Thank you, ${order.customerName}! Download the receipt down below.`;
+    `Thank you, ${order.customerName}! Wait for the store to approve your order.`;
   document.getElementById('success-sub').innerHTML =
-    `To know if your order is approved, the store will send you a message — or check <a href="my-orders.html">My Orders</a> if you're logged in.`;
+    `To know if your order is approved, the store will send you a message — or check <a href="my-orders.html">My Orders</a>.`;
 
   const dateStr = order.date.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' });
   const timeStr = order.date.toLocaleTimeString('en-PH', { hour:'numeric', minute:'2-digit' });

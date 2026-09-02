@@ -93,7 +93,6 @@
    FALLBACK PASSWORD — same as orders.html/admin.html.
    ======================================================== */
 const ADMIN_PASSWORD_FALLBACK = "admin123";
-const ADMIN_SESSION_KEY = "myresto_admin_session_v1"; // set on login, checked by index.html for the maintenance-mode bypass
 
 /* Must match the keys used elsewhere in the project exactly. */
 const PRODUCTS_STORAGE_KEY = "myresto_products_v1";
@@ -184,12 +183,10 @@ if(FIREBASE_ENABLED){
     if(user){
       document.getElementById('login-screen').hidden = true;
       document.getElementById('app').hidden = false;
-      localStorage.setItem(ADMIN_SESSION_KEY, '1');
       boot();
     } else {
       document.getElementById('app').hidden = true;
       document.getElementById('login-screen').hidden = false;
-      localStorage.removeItem(ADMIN_SESSION_KEY);
     }
   });
 }
@@ -235,7 +232,6 @@ function attemptLegacyLogin(){
   if(val === ADMIN_PASSWORD_FALLBACK){
     document.getElementById('login-screen').hidden = true;
     document.getElementById('app').hidden = false;
-    localStorage.setItem(ADMIN_SESSION_KEY, '1');
     boot();
   } else {
     document.getElementById('login-error-legacy').style.display = 'block';
@@ -250,7 +246,6 @@ function logOut(){
     document.getElementById('login-screen').hidden = false;
     document.getElementById('login-password-legacy').value = '';
     document.getElementById('login-error-legacy').style.display = 'none';
-    localStorage.removeItem(ADMIN_SESSION_KEY);
   }
 }
 
