@@ -65,6 +65,7 @@
       <a class="sidebar-link" href="admin.html"><i class="fa-solid fa-clipboard-list"></i> Menu Admin</a>
       <a class="sidebar-link" href="orders.html"><i class="fa-solid fa-receipt"></i> Orders</a>
       <span class="sidebar-link current"><i class="fa-solid fa-chart-line"></i> Statistics</span>
+      <a class="sidebar-link" href="trash.html"><i class="fa-solid fa-trash"></i> Trash</a>
       <a class="sidebar-link" href="index.html" target="_blank"><i class="fa-solid fa-arrow-up-right-from-square"></i> View Store</a>
     </div>
     <div class="sidebar-footer">
@@ -307,9 +308,13 @@ function toggleBestSellersEnabled(checked){
 function money(n){ return "₱" + Number(n||0).toLocaleString('en-PH'); }
 
 function computeStats(){
+  // Trashed orders are excluded from every stat below — a moved-to-trash
+  // order shouldn't count toward revenue, items sold, or ratings.
+  const activeOrders = ORDERS.filter(o => !o.deleted);
+
   // Only orders the kitchen actually fulfilled count as "sold" — pending/
   // approved orders haven't happened yet, and cancelled ones didn't happen.
-  const completed = ORDERS.filter(o => o.status === 'completed');
+  const completed = activeOrders.filter(o => o.status === 'completed');
 
   const soldByProduct = {}; // productId -> { qty, revenue, name, category }
   completed.forEach(o=>{
@@ -344,7 +349,7 @@ function computeStats(){
 
   const totalRevenue = completed.reduce((sum,o) => sum + (o.total || 0), 0);
   const totalItemsSold = Object.values(soldByProduct).reduce((sum,s) => sum + s.qty, 0);
-  const rated = ORDERS.filter(o => o.rating);
+  const rated = activeOrders.filter(o => o.rating);
   const avgRating = rated.length ? (rated.reduce((sum,o)=>sum+o.rating,0) / rated.length) : null;
 
   return { byCategory, totalRevenue, totalItemsSold, completedCount: completed.length, avgRating, ratedCount: rated.length };

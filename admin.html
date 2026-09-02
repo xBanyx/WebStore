@@ -68,6 +68,7 @@
       <span class="sidebar-link current"><i class="fa-solid fa-clipboard-list"></i> Menu Admin</span>
       <a class="sidebar-link" href="orders.html"><i class="fa-solid fa-receipt"></i> Orders</a>
       <a class="sidebar-link" href="stats.html"><i class="fa-solid fa-chart-line"></i> Statistics</a>
+      <a class="sidebar-link" href="trash.html"><i class="fa-solid fa-trash"></i> Trash</a>
       <a class="sidebar-link" href="index.html" target="_blank"><i class="fa-solid fa-arrow-up-right-from-square"></i> View Store</a>
       <button class="sidebar-link" id="account-btn" onclick="openAccountModal()" hidden><i class="fa-solid fa-user"></i> Account</button>
     </div>
@@ -478,11 +479,39 @@ if(FIREBASE_ENABLED){
 // rules can tell store staff apart from ordinary signed-in customers —
 // see the Firestore rules notes for how this is used. Safe to call every
 // login; it just re-confirms the same doc each time.
+//
+// Role: the very first time an account's admin doc is created here, it's
+// stamped role:'main' — this is someone who signed up directly, not a
+// teammate added via "Add Teammate" (those get role:'staff' up front, see
+// addTeammate() below). Only a main admin can permanently delete from
+// Trash. Existing admin docs from before this feature have no role field
+// at all — isMainAdmin() (here and in the Firestore rules) treats a
+// missing role the same as 'main', so nobody who already had full access
+// loses it.
 function registerAsAdmin(user){
-  db.collection('admins').doc(user.uid).set({
-    email: user.email,
-    lastLogin: firebase.firestore.FieldValue.serverTimestamp()
-  }, { merge: true }).catch(e=>console.error('Could not register admin record', e));
+  const ref = db.collection('admins').doc(user.uid);
+  ref.get().then(snap=>{
+    const data = { email: user.email, lastLogin: firebase.firestore.FieldValue.serverTimestamp() };
+    if(!snap.exists){
+      data.role = 'main';
+    }
+    return ref.set(data, { merge: true });
+  }).catch(e=>console.error('Could not register admin record', e));
+}
+
+// Mirrors the isMainAdmin() Firestore rule client-side, for pages (Trash)
+// that need to show/hide the permanent-delete controls. The rules are the
+// real enforcement — this is just so the buttons don't appear for staff
+// who'd be denied anyway.
+function checkIsMainAdmin(){
+  if(!auth.currentUser) return Promise.resolve(false);
+  return db.collection('admins').doc(auth.currentUser.uid).get()
+    .then(snap=>{
+      if(!snap.exists) return false;
+      const role = snap.data().role;
+      return !role || role === 'main';
+    })
+    .catch(e=>{ console.error('Could not check admin role', e); return false; });
 }
 
 function attemptLogin(){
@@ -635,6 +664,17 @@ function addTeammate(){
 
   const myEmail = auth.currentUser.email;
   auth.createUserWithEmailAndPassword(email, pass)
+    .then(cred=>{
+      // Still signed in as the brand-new teammate for this instant — write
+      // their admin doc now, tagged role:'staff' so they can manage orders
+      // and the menu but can never permanently delete from Trash (only a
+      // 'main' admin can).
+      return db.collection('admins').doc(cred.user.uid).set({
+        email: cred.user.email,
+        role: 'staff',
+        lastLogin: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    })
     .then(()=>auth.signOut())
     .then(()=>{
       closeAccountModal();
