@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Trash — My Restaurant</title>
+<link rel="stylesheet" href="admin.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="firebase-config.js"></script>
+<style>
+  .trash-order-card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;margin-bottom:12px;}
+  .trash-order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+  .trash-order-number{font-weight:800;font-size:14px;}
+  .trash-order-meta{font-size:12px;color:var(--muted);margin-top:2px;}
+  .trash-deleted-note{font-size:12px;color:#b23b3b;margin-top:6px;}
+  .trash-order-total{font-weight:800;font-size:14px;flex-shrink:0;}
+  .trash-order-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+  .trash-empty{color:var(--muted);font-size:13.5px;text-align:center;padding:40px 20px;}
+  .trash-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;}
+  .trash-count{font-size:12.5px;color:var(--muted);}
+  .trash-staff-note{
+    background:#fff4e8;border:1px dashed var(--primary);color:var(--primary-dark);
+    border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.5;margin-bottom:14px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ============== LOGIN SCREEN ============== -->
+<div id="login-screen" class="login-wrap">
+  <div class="login-card">
+    <h2>Trash</h2>
+    <div id="login-firebase">
+      <p>Sign in with your admin account.</p>
+      <input type="email" id="login-email" placeholder="Email" autocomplete="username">
+      <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+      <div class="login-error" id="login-error"></div>
+      <button class="btn btn-primary btn-block" onclick="attemptLogin()">Log In</button>
+      <button class="link-btn" style="margin-top:10px;width:100%;text-align:center;" onclick="forgotPassword()">Forgot password?</button>
+    </div>
+    <div id="login-legacy" hidden>
+      <p>Enter the admin password.</p>
+      <input type="password" id="login-password-legacy" placeholder="Password" autocomplete="current-password">
+      <div class="login-error" id="login-error-legacy">Incorrect password.</div>
+      <button class="btn btn-primary btn-block" onclick="attemptLegacyLogin()">Log In</button>
+      <div class="login-note" style="color:#b23b3b;">
+        <i class="fa-solid fa-triangle-exclamation"></i> Firebase isn't configured, so this page is using a weak,
+        insecure client-side password. Fill in firebase-config.js and set up Firebase Authentication for real login security.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============== TRASH APP (hidden until logged in) ============== -->
+<div id="app" hidden>
+
+  <div class="topbar">
+    <button class="menu-toggle" onclick="openSidebar()" aria-label="Open menu"><i class="fa-solid fa-bars"></i></button>
+    <h1>Trash</h1>
+    <span class="sync-badge" id="sync-badge">Checking sync…</span>
+  </div>
+
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-title">Store Orders</span>
+      <button class="sidebar-close" onclick="closeSidebar()" aria-label="Close menu">×</button>
+    </div>
+    <div class="sidebar-links">
+      <a class="sidebar-link" href="admin.html"><i class="fa-solid fa-clipboard-list"></i> Menu Admin</a>
+      <a class="sidebar-link" href="orders.html"><i class="fa-solid fa-receipt"></i> Orders</a>
+      <a class="sidebar-link" href="stats.html"><i class="fa-solid fa-chart-line"></i> Statistics</a>
+      <span class="sidebar-link current"><i class="fa-solid fa-trash"></i> Trash</span>
+      <a class="sidebar-link" href="index.html" target="_blank"><i class="fa-solid fa-arrow-up-right-from-square"></i> View Store</a>
+    </div>
+    <div class="sidebar-footer">
+      <button class="sidebar-link logout" onclick="logOut()">Log Out</button>
+    </div>
+  </nav>
+
+  <div class="section">
+    <p style="font-size:12.5px;color:var(--muted);margin:0 0 14px;line-height:1.5;">
+      Orders deleted from the Orders page land here first. Any admin can restore an order back to Orders.
+      Permanently deleting — one order, or everything — needs the main admin's password and can't be undone.
+    </p>
+
+    <div id="staff-note" class="trash-staff-note" hidden>
+      <i class="fa-solid fa-lock"></i> You're signed in as a teammate account, so permanent deletion is turned
+      off here. Only the main admin account can empty the Trash for good.
+    </div>
+
+    <div class="trash-toolbar">
+      <span class="trash-count" id="trash-count">0 items in Trash</span>
+      <button class="btn btn-danger btn-sm" id="delete-all-btn" onclick="requestDeleteAll()" hidden>
+        <i class="fa-solid fa-trash-can"></i> Delete All Permanently
+      </button>
+    </div>
+
+    <div id="trash-list"></div>
+  </div>
+
+  <!-- PASSWORD CONFIRMATION MODAL — required for any permanent delete -->
+  <div class="modal-backdrop" id="confirm-backdrop" hidden>
+    <div class="modal-sheet">
+      <div class="modal-sheet-header">
+        <h3 id="confirm-title">Confirm permanent delete</h3>
+        <button class="modal-close" onclick="closeConfirmModal()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <p id="confirm-body" style="font-size:13px;color:var(--muted);margin:0 0 14px;line-height:1.5;"></p>
+      <div class="field">
+        <label>Enter your admin password to confirm</label>
+        <input type="password" id="confirm-password" placeholder="Password" autocomplete="current-password">
+      </div>
+      <div class="login-error" id="confirm-error" style="margin-bottom:8px;"></div>
+      <button class="btn btn-danger btn-block" onclick="submitConfirm()">Permanently Delete</button>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const ADMIN_PASSWORD_FALLBACK = "admin123";
+const ADMIN_SESSION_KEY = "myresto_admin_session_v1";
+const ORDERS_STORAGE_KEY = "myresto_orders_v1"; // same key orders.html/index.html use
+
+const FIREBASE_ENABLED = typeof FIREBASE_CONFIG !== 'undefined' &&
+  !!FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('YOUR_');
+
+let db = null;
+let auth = null;
+if(FIREBASE_ENABLED){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  db = firebase.firestore();
+  auth = firebase.auth();
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+}
+function ordersCollection(){ return db.collection('orders'); }
+
+function money(n){ return "₱" + Number(n||0).toLocaleString('en-PH'); }
+
+function updateSyncBadge(){
+  const el = document.getElementById('sync-badge');
+  if(!el) return;
+  if(FIREBASE_ENABLED){
+    el.innerHTML = '<i class="fa-solid fa-cloud"></i> Cloud sync on';
+    el.classList.add('on'); el.classList.remove('off');
+  } else {
+    el.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Local only';
+    el.classList.add('off'); el.classList.remove('on');
+  }
+}
+
+let orders = [];
+let isMainAdmin = false;
+
+/* ======================= SIDEBAR ======================= */
+function openSidebar(){
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sidebar-overlay').classList.add('show');
+}
+function closeSidebar(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('show');
+}
+document.addEventListener('keydown', e=>{ if(e.key === 'Escape') closeSidebar(); });
+
+/* ======================= LOGIN ======================= */
+(function initLoginMode(){
+  document.getElementById('login-firebase').hidden = !FIREBASE_ENABLED;
+  document.getElementById('login-legacy').hidden = FIREBASE_ENABLED;
+})();
+
+if(FIREBASE_ENABLED){
+  auth.onAuthStateChanged(user=>{
+    if(user){
+      document.getElementById('login-screen').hidden = true;
+      document.getElementById('app').hidden = false;
+      localStorage.setItem(ADMIN_SESSION_KEY, '1');
+      boot();
+    } else {
+      document.getElementById('app').hidden = true;
+      document.getElementById('login-screen').hidden = false;
+      localStorage.removeItem(ADMIN_SESSION_KEY);
+    }
+  });
+}
+
+function attemptLogin(){
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  if(!email || !password){ errEl.textContent = 'Enter your email and password.'; errEl.style.display = 'block'; return; }
+  auth.signInWithEmailAndPassword(email, password)
+    .catch(e=>{ errEl.textContent = friendlyAuthError(e); errEl.style.display = 'block'; });
+}
+document.getElementById('login-password').addEventListener('keydown', e=>{ if(e.key === 'Enter') attemptLogin(); });
+document.getElementById('login-password-legacy').addEventListener('keydown', e=>{ if(e.key === 'Enter') attemptLegacyLogin(); });
+
+function forgotPassword(){
+  const email = document.getElementById('login-email').value.trim();
+  const errEl = document.getElementById('login-error');
+  if(!email){ errEl.textContent = 'Enter your email above first, then tap "Forgot password?" again.'; errEl.style.display = 'block'; return; }
+  auth.sendPasswordResetEmail(email)
+    .then(()=>{ errEl.style.color = '#1e7a3d'; errEl.textContent = `Password reset email sent to ${email}.`; errEl.style.display = 'block'; })
+    .catch(e=>{ errEl.style.color = ''; errEl.textContent = friendlyAuthError(e); errEl.style.display = 'block'; });
+}
+
+function friendlyAuthError(e){
+  switch(e.code){
+    case 'auth/invalid-email': return 'That email address doesn\'t look right.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential': return 'Incorrect email or password.';
+    case 'auth/too-many-requests': return 'Too many attempts — please wait a bit and try again.';
+    default: return e.message || 'Something went wrong. Please try again.';
+  }
+}
+
+function attemptLegacyLogin(){
+  const val = document.getElementById('login-password-legacy').value;
+  if(val === ADMIN_PASSWORD_FALLBACK){
+    document.getElementById('login-screen').hidden = true;
+    document.getElementById('app').hidden = false;
+    localStorage.setItem(ADMIN_SESSION_KEY, '1');
+    boot();
+  } else {
+    document.getElementById('login-error-legacy').style.display = 'block';
+  }
+}
+
+function logOut(){
+  if(FIREBASE_ENABLED){
+    auth.signOut();
+  } else {
+    document.getElementById('app').hidden = true;
+    document.getElementById('login-screen').hidden = false;
+    localStorage.removeItem(ADMIN_SESSION_KEY);
+  }
+}
+
+/* ======================= LOAD ======================= */
+function loadOrdersLocal(){
+  try{
+    const raw = localStorage.getItem(ORDERS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(e){ return []; }
+}
+
+async function boot(){
+  updateSyncBadge();
+  orders = loadOrdersLocal();
+  render();
+
+  if(FIREBASE_ENABLED){
+    // Determine role so the permanent-delete controls only show for a main
+    // admin — the Firestore rules are the real enforcement, this is just
+    // so staff accounts don't see buttons they'd be denied for anyway.
+    checkIsMainAdmin().then(result=>{
+      isMainAdmin = result;
+      document.getElementById('staff-note').hidden = isMainAdmin;
+      render();
+    });
+
+    ordersCollection().onSnapshot(snap=>{
+      orders = snap.docs.map(d => d.data());
+      render();
+    }, err=>{
+      console.error('Order sync error:', err);
+      showToast("Couldn't reach cloud storage — showing the local copy");
+    });
+  }
+}
+
+// Mirrors admin.html's isMainAdmin() Firestore rule. A missing role field
+// (accounts created before this feature existed) counts as main, same as
+// the rules — nobody who already had full access loses it.
+function checkIsMainAdmin(){
+  if(!auth.currentUser) return Promise.resolve(false);
+  return db.collection('admins').doc(auth.currentUser.uid).get()
+    .then(snap=>{
+      if(!snap.exists) return false;
+      const role = snap.data().role;
+      return !role || role === 'main';
+    })
+    .catch(e=>{ console.error('Could not check admin role', e); return false; });
+}
+
+/* ======================= RENDER ======================= */
+function render(){
+  const trashed = orders.filter(o => o.deleted)
+    .sort((a,b) => new Date(b.deletedAt || 0) - new Date(a.deletedAt || 0));
+
+  document.getElementById('trash-count').textContent =
+    `${trashed.length} item${trashed.length === 1 ? '' : 's'} in Trash`;
+  document.getElementById('delete-all-btn').hidden = !isMainAdmin || trashed.length === 0;
+
+  const list = document.getElementById('trash-list');
+  if(!trashed.length){
+    list.innerHTML = `<p class="trash-empty">Trash is empty.</p>`;
+    return;
+  }
+
+  list.innerHTML = trashed.map(o=>{
+    const deletedOn = o.deletedAt ? new Date(o.deletedAt).toLocaleString('en-PH', {
+      month:'short', day:'numeric', hour:'numeric', minute:'2-digit'
+    }) : '—';
+    return `
+      <div class="trash-order-card">
+        <div class="trash-order-head">
+          <div>
+            <div class="trash-order-number">${o.orderNumber}</div>
+            <div class="trash-order-meta">${o.customerName || 'Unknown customer'}</div>
+          </div>
+          <div class="trash-order-total">${money(o.total)}</div>
+        </div>
+        <div class="trash-deleted-note">
+          <i class="fa-solid fa-trash"></i> Deleted ${deletedOn}${o.deletedBy ? ' by ' + o.deletedBy : ''}
+        </div>
+        <div class="trash-order-actions">
+          <button class="btn btn-secondary btn-sm" onclick="restoreOrder('${o.orderNumber}')"><i class="fa-solid fa-clock-rotate-left"></i> Restore</button>
+          ${isMainAdmin ? `
+            <button class="btn btn-danger btn-sm" onclick="requestDeleteOne('${o.orderNumber}')"><i class="fa-solid fa-trash-can"></i> Delete Permanently</button>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+/* ======================= RESTORE ======================= */
+function restoreOrder(orderNumber){
+  const order = orders.find(o => o.orderNumber === orderNumber);
+  if(!order) return;
+  order.deleted = false;
+  order.deletedAt = null;
+  order.deletedBy = null;
+  render();
+  showToast('Order restored');
+
+  if(FIREBASE_ENABLED){
+    ordersCollection().doc(orderNumber).update({ deleted: false, deletedAt: null, deletedBy: null })
+      .catch(e=>{
+        console.error('Could not restore order in the cloud', e);
+        showToast("Restored here, but couldn't sync — please try again");
+      });
+  }
+}
+
+/* ======================= PERMANENT DELETE (main admin + password only) =======================
+   Firestore rules only let a main admin's account issue a hard delete()
+   on an order at all, so even if someone bypassed this UI, the write
+   would be rejected. The password re-entry here is an extra local
+   confirmation step, using Firebase's reauthenticate flow (same pattern
+   as changePassword() in admin.html) before the delete actually fires. */
+let pendingDelete = null; // { mode: 'one'|'all', orderNumber? }
+
+function requestDeleteOne(orderNumber){
+  if(!isMainAdmin){ showToast('Only the main admin can permanently delete orders'); return; }
+  pendingDelete = { mode: 'one', orderNumber };
+  document.getElementById('confirm-title').textContent = 'Delete this order permanently?';
+  document.getElementById('confirm-body').textContent =
+    `Order ${orderNumber} will be gone for good — this can't be undone.`;
+  document.getElementById('confirm-password').value = '';
+  document.getElementById('confirm-error').style.display = 'none';
+  document.getElementById('confirm-backdrop').hidden = false;
+}
+
+function requestDeleteAll(){
+  if(!isMainAdmin){ showToast('Only the main admin can permanently delete orders'); return; }
+  const count = orders.filter(o => o.deleted).length;
+  if(!count) return;
+  pendingDelete = { mode: 'all' };
+  document.getElementById('confirm-title').textContent = 'Empty the Trash?';
+  document.getElementById('confirm-body').textContent =
+    `All ${count} order${count === 1 ? '' : 's'} in Trash will be permanently deleted — this can't be undone.`;
+  document.getElementById('confirm-password').value = '';
+  document.getElementById('confirm-error').style.display = 'none';
+  document.getElementById('confirm-backdrop').hidden = false;
+}
+
+function closeConfirmModal(){
+  document.getElementById('confirm-backdrop').hidden = true;
+  pendingDelete = null;
+}
+
+function submitConfirm(){
+  if(!pendingDelete) return;
+  const password = document.getElementById('confirm-password').value;
+  const errEl = document.getElementById('confirm-error');
+  errEl.style.display = 'none';
+
+  if(!FIREBASE_ENABLED){
+    // Local-only fallback (no Firebase Auth to reauthenticate against) —
+    // just check the same client-side admin password used to log in.
+    if(password !== ADMIN_PASSWORD_FALLBACK){
+      errEl.textContent = 'Incorrect password.';
+      errEl.style.display = 'block';
+      return;
+    }
+    return performPendingDelete();
+  }
+
+  if(!password){
+    errEl.textContent = 'Enter your password to continue.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const user = auth.currentUser;
+  const credential = firebase.auth.EmailAuthProvider.credential(user.email, password);
+  user.reauthenticateWithCredential(credential)
+    .then(()=>performPendingDelete())
+    .catch(e=>{
+      errEl.textContent = friendlyAuthError(e);
+      errEl.style.display = 'block';
+    });
+}
+
+function performPendingDelete(){
+  const job = pendingDelete;
+  document.getElementById('confirm-backdrop').hidden = true;
+  pendingDelete = null;
+
+  if(job.mode === 'one'){
+    orders = orders.filter(o => o.orderNumber !== job.orderNumber);
+    render();
+    showToast('Order permanently deleted');
+    if(FIREBASE_ENABLED){
+      ordersCollection().doc(job.orderNumber).delete()
+        .catch(e=>{
+          console.error('Could not permanently delete order', e);
+          showToast("Couldn't delete in the cloud — it may reappear");
+        });
+    }
+    return;
+  }
+
+  // mode === 'all'
+  const trashedNumbers = orders.filter(o => o.deleted).map(o => o.orderNumber);
+  orders = orders.filter(o => !o.deleted);
+  render();
+  showToast('Trash emptied');
+
+  if(FIREBASE_ENABLED && trashedNumbers.length){
+    // Firestore batches cap at 500 writes — chunk just in case a store
+    // somehow has more trashed orders than that.
+    const chunks = [];
+    for(let i=0; i<trashedNumbers.length; i+=450) chunks.push(trashedNumbers.slice(i, i+450));
+    chunks.reduce((chain, chunk)=>{
+      return chain.then(()=>{
+        const batch = db.batch();
+        chunk.forEach(num => batch.delete(ordersCollection().doc(num)));
+        return batch.commit();
+      });
+    }, Promise.resolve()).catch(e=>{
+      console.error('Could not empty trash in the cloud', e);
+      showToast("Couldn't finish syncing the deletion — please refresh and retry");
+    });
+  }
+}
+
+/* ======================= TOAST ======================= */
+let toastTimer;
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 1600);
+}
+</script>
+</body>
+</html>
