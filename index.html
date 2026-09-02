@@ -29,7 +29,23 @@
     <button class="btn btn-secondary btn-block" style="margin-top:10px;" onclick="chooseGuest()">Continue as Guest</button>
   </div>
 </div>
+<!-- Shown to customers in place of the whole storefront while maintenance
+     mode is on. The admin still sees the real menu (see applyMaintenanceState). -->
+<div id="maintenance-screen" hidden>
+  <div class="maintenance-card">
+    <img id="maintenance-logo" alt="">
+    <div class="maintenance-icon"><i class="fa-solid fa-utensils"></i></div>
+    <h2>We'll Be Right Back</h2>
+    <p id="maintenance-message-text">We're doing some quick updates — thanks for your patience!</p>
+  </div>
+</div>
+
 <div id="app">
+
+  <div id="admin-preview-banner" hidden>
+    <i class="fa-solid fa-triangle-exclamation"></i>
+    Maintenance mode is ON — customers see the maintenance page. You're seeing the real menu because you're logged in as admin.
+  </div>
 
   <div class="topbar">
     <div class="brand">
@@ -441,7 +457,30 @@ function dataFinishedLoading(){
 function tryFinishBoot(){
   if(!configReady || !productsReady || !authReady) return;
   hideLoadingScreen();
-  maybeShowGate();
+  applyMaintenanceState();
+  if(!(MAINTENANCE_STATE.enabled && !isAdminBypass())) maybeShowGate();
+}
+
+/* ======================= MAINTENANCE MODE ======================= */
+// Shows the full-screen maintenance page to everyone except whoever's
+// currently logged into an admin panel on this same browser (admin.html,
+// orders.html, or stats.html all set the same flag on login).
+function applyMaintenanceState(){
+  const bypass = isAdminBypass();
+  const showMaintenance = MAINTENANCE_STATE.enabled && !bypass;
+
+  document.getElementById('maintenance-screen').hidden = !showMaintenance;
+  document.getElementById('app').hidden = showMaintenance;
+  if(showMaintenance) document.getElementById('gate-screen').hidden = true;
+
+  if(showMaintenance){
+    const logo = document.getElementById('maintenance-logo');
+    if(RESTAURANT_CONFIG.logo){ logo.src = RESTAURANT_CONFIG.logo; logo.classList.add('show'); }
+    document.getElementById('maintenance-message-text').textContent =
+      MAINTENANCE_STATE.message || "We're doing some quick updates — thanks for your patience!";
+  }
+
+  document.getElementById('admin-preview-banner').hidden = !(MAINTENANCE_STATE.enabled && bypass);
 }
 
 /* ======================= SIGN-IN GATE =======================
@@ -605,6 +644,26 @@ function loadBestSellersEnabled(){
   }catch(e){ return true; }
 }
 let BEST_SELLERS_ENABLED = loadBestSellersEnabled();
+
+// Maintenance mode — set from admin.html, mirrors the same doc/local-storage
+// pattern as everything else above. { enabled, message } as one JSON blob
+// so it always loads/saves as a matched pair.
+const MAINTENANCE_STORAGE_KEY = "myresto_maintenance_v1";
+const ADMIN_SESSION_KEY = "myresto_admin_session_v1"; // set by admin.html/orders.html/stats.html on login
+function loadMaintenanceState(){
+  try{
+    const raw = localStorage.getItem(MAINTENANCE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return {
+      enabled: !!(parsed && parsed.enabled),
+      message: (parsed && typeof parsed.message === 'string') ? parsed.message : ""
+    };
+  }catch(e){ return { enabled:false, message:"" }; }
+}
+let MAINTENANCE_STATE = loadMaintenanceState();
+function isAdminBypass(){
+  try{ return localStorage.getItem(ADMIN_SESSION_KEY) === '1'; }catch(e){ return false; }
+}
 
 /* ======================= STATE ======================= */
 // Cart is a list of line items (not keyed by product id) because the same
@@ -884,13 +943,22 @@ function init(){
           legacyProductsFallback = data.products;
           if(!PRODUCTS.length) applyProducts(legacyProductsFallback);
         }
-        if(changed){
+        let maintenanceChanged = false;
+        if(typeof data.maintenanceMode === 'boolean' && data.maintenanceMode !== MAINTENANCE_STATE.enabled){
+          MAINTENANCE_STATE.enabled = data.maintenanceMode; maintenanceChanged = true;
+        }
+        if(typeof data.maintenanceMessage === 'string' && data.maintenanceMessage !== MAINTENANCE_STATE.message){
+          MAINTENANCE_STATE.message = data.maintenanceMessage; maintenanceChanged = true;
+        }
+        if(changed || maintenanceChanged){
           try{
             localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(RESTAURANT_CONFIG));
             localStorage.setItem(BEST_SELLERS_STORAGE_KEY, JSON.stringify(BEST_SELLERS));
             localStorage.setItem(BEST_SELLERS_ENABLED_KEY, String(BEST_SELLERS_ENABLED));
+            localStorage.setItem(MAINTENANCE_STORAGE_KEY, JSON.stringify(MAINTENANCE_STATE));
           }catch(e){ /* localStorage may be full/unavailable — cloud copy still applies live */ }
-          applyConfig();
+          if(changed) applyConfig();
+          if(maintenanceChanged) applyMaintenanceState();
         }
       }
       configReady = true;
@@ -1017,7 +1085,11 @@ function renderMenu(){
   wrap.innerHTML = '';
 
   if(!PRODUCTS.length){
-    wrap.innerHTML = `<p class="menu-empty-note">Note: Please wait for it to load.</p>`;
+    wrap.innerHTML = `
+      <div class="menu-empty-note">
+        <div class="loading-spinner" style="margin:0 auto 12px;"></div>
+        Please wait for the database to load the menu…
+      </div>`;
     return;
   }
 

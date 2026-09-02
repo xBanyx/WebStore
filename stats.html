@@ -93,45 +93,12 @@
    FALLBACK PASSWORD — same as orders.html/admin.html.
    ======================================================== */
 const ADMIN_PASSWORD_FALLBACK = "admin123";
+const ADMIN_SESSION_KEY = "myresto_admin_session_v1"; // set on login, checked by index.html for the maintenance-mode bypass
 
 /* Must match the keys used elsewhere in the project exactly. */
 const PRODUCTS_STORAGE_KEY = "myresto_products_v1";
 const ORDERS_STORAGE_KEY   = "myresto_orders_v1";
 const BEST_SELLERS_ENABLED_KEY = "myresto_bestsellers_enabled_v1";
-
-// Kept identical to the storefront's built-in defaults, same as admin.html.
-const DEFAULT_PRODUCTS = [
-  {
-    id:"chicken-inasal", name:"Chicken Inasal", description:"Grilled Filipino-style chicken",
-    images:["https://picsum.photos/seed/chicken-inasal-1/500/500"],
-    sizes:[ {name:"Regular", price:230}, {name:"Large", price:280} ],
-    category:"Meals", available:true
-  },
-  {
-    id:"carbonara", name:"Carbonara", description:"Creamy classic pasta",
-    images:["https://picsum.photos/seed/carbonara-1/500/500"],
-    sizes:[ {name:"Solo", price:220}, {name:"Sharing", price:340} ],
-    category:"Meals", available:true
-  },
-  {
-    id:"sisig", name:"Sisig", description:"Sizzling chopped pork",
-    images:["https://picsum.photos/seed/sisig-1/500/500"],
-    sizes:[ {name:"Regular", price:210}, {name:"Large", price:260} ],
-    category:"Meals", available:true
-  },
-  {
-    id:"halo-halo", name:"Halo-Halo", description:"Mixed shaved ice dessert",
-    images:["https://picsum.photos/seed/halo-halo-1/500/500"],
-    sizes:[ {name:"Regular", price:120} ],
-    category:"Desserts", available:true
-  },
-  {
-    id:"iced-tea", name:"Iced Tea", description:"House-blend iced tea",
-    images:["https://picsum.photos/seed/iced-tea-1/500/500"],
-    sizes:[ {name:"16oz", price:60}, {name:"22oz", price:80} ],
-    category:"Drinks", available:true
-  }
-];
 
 const FIREBASE_ENABLED = typeof FIREBASE_CONFIG !== 'undefined' &&
   !!FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('YOUR_');
@@ -183,10 +150,12 @@ if(FIREBASE_ENABLED){
     if(user){
       document.getElementById('login-screen').hidden = true;
       document.getElementById('app').hidden = false;
+      localStorage.setItem(ADMIN_SESSION_KEY, '1');
       boot();
     } else {
       document.getElementById('app').hidden = true;
       document.getElementById('login-screen').hidden = false;
+      localStorage.removeItem(ADMIN_SESSION_KEY);
     }
   });
 }
@@ -232,6 +201,7 @@ function attemptLegacyLogin(){
   if(val === ADMIN_PASSWORD_FALLBACK){
     document.getElementById('login-screen').hidden = true;
     document.getElementById('app').hidden = false;
+    localStorage.setItem(ADMIN_SESSION_KEY, '1');
     boot();
   } else {
     document.getElementById('login-error-legacy').style.display = 'block';
@@ -246,6 +216,7 @@ function logOut(){
     document.getElementById('login-screen').hidden = false;
     document.getElementById('login-password-legacy').value = '';
     document.getElementById('login-error-legacy').style.display = 'none';
+    localStorage.removeItem(ADMIN_SESSION_KEY);
   }
 }
 
@@ -254,8 +225,8 @@ function loadProductsLocal(){
   try{
     const raw = localStorage.getItem(PRODUCTS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    return (Array.isArray(parsed) && parsed.length) ? parsed : DEFAULT_PRODUCTS;
-  }catch(e){ return DEFAULT_PRODUCTS; }
+    return (Array.isArray(parsed) && parsed.length) ? parsed : [];
+  }catch(e){ return []; }
 }
 function loadOrdersLocal(){
   try{

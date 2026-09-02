@@ -490,6 +490,32 @@
 .loading-text{ font-size:13px; font-weight:700; color:var(--muted, #8a8178); letter-spacing:.02em; }
 @keyframes loading-spin{ to{ transform:rotate(360deg); } }
 
+/* ======================= MAINTENANCE MODE ======================= */
+#maintenance-screen{
+  position:fixed; inset:0; z-index:9997;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--bg); padding:20px;
+}
+.maintenance-card{
+  background:var(--card,#fff); border-radius:var(--radius,14px); box-shadow:var(--shadow);
+  max-width:360px; width:100%; padding:32px 26px; text-align:center;
+}
+.maintenance-card img{width:52px;height:52px;border-radius:50%;object-fit:cover;margin:0 auto 14px;display:none;}
+.maintenance-card img.show{display:block;}
+.maintenance-icon{
+  width:60px;height:60px;border-radius:50%;margin:0 auto 16px;
+  background:var(--primary,#d9480f);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:24px;
+}
+.maintenance-card h2{margin:0 0 10px;font-size:19px;}
+.maintenance-card p{color:var(--muted,#8a8078);font-size:13.5px;line-height:1.6;margin:0;white-space:pre-line;}
+#admin-preview-banner{
+  background:#3a2c1a;color:#ffce8a;font-size:11.5px;font-weight:700;
+  padding:9px 14px;text-align:center;line-height:1.5;
+  display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;
+}
+#admin-preview-banner .fa-triangle-exclamation{color:#ffb03a;}
+
 /* ======================= SEND RECEIPT POPUP ======================= */
 /* Always centered on screen (unlike the bottom-sheet product modal,
    which intentionally docks to the bottom on mobile). */

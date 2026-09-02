@@ -77,6 +77,22 @@
   </nav>
 
   <div class="section">
+    <div class="section-title">Store Status</div>
+    <div class="card" id="maintenance-card">
+      <div class="avail-toggle">
+        <input type="checkbox" id="maintenance-toggle" onchange="toggleMaintenance(this.checked)">
+        <label for="maintenance-toggle" style="margin:0;">Under Maintenance (hide storefront from customers)</label>
+      </div>
+      <div class="field" style="margin-top:10px;">
+        <label>Message shown to customers</label>
+        <textarea id="maintenance-message-input" rows="2" placeholder="We're doing some quick updates — back soon!"></textarea>
+      </div>
+      <button class="btn btn-secondary btn-block" onclick="saveMaintenanceMessage()">Save Message</button>
+      <p class="stat-publish-note" id="maintenance-note" style="margin-top:8px;"></p>
+    </div>
+  </div>
+
+  <div class="section">
     <div class="section-title">Store Info</div>
     <div class="card">
       <div class="field">
@@ -195,7 +211,7 @@
   </div>
 
   <div class="section">
-    <button class="btn btn-danger btn-block" onclick="resetToDefaults()">Reset Menu to Defaults</button>
+    <button class="btn btn-danger btn-block" onclick="clearAllProducts()">Clear All Menu Items</button>
   </div>
 
 </div>
@@ -254,6 +270,12 @@ const ADMIN_PASSWORD_FALLBACK = "admin123";
 /* Must match the keys used in restaurant-webstore.html exactly. */
 const PRODUCTS_STORAGE_KEY = "myresto_products_v1";
 const CONFIG_STORAGE_KEY   = "myresto_config_v1";
+const MAINTENANCE_STORAGE_KEY = "myresto_maintenance_v1";
+// Set on every admin-panel login (here, orders.html, and stats.html) and
+// cleared on logout — index.html checks this on the same browser/device to
+// let the admin preview the real menu while maintenance mode is on for
+// everyone else.
+const ADMIN_SESSION_KEY = "myresto_admin_session_v1";
 
 /* ========================================================
    CLOUD SYNC (Firebase Firestore only — no Firebase Storage).
@@ -421,57 +443,6 @@ const DEFAULT_RESTAURANT_CONFIG = {
   }
 };
 
-// Kept identical to the storefront's built-in defaults so "Reset to Defaults" matches.
-const DEFAULT_PRODUCTS = [
-  {
-    id:"chicken-inasal", name:"Chicken Inasal", description:"Grilled Filipino-style chicken",
-    images:[
-      "https://picsum.photos/seed/chicken-inasal-1/500/500",
-      "https://picsum.photos/seed/chicken-inasal-2/500/500",
-      "https://picsum.photos/seed/chicken-inasal-3/500/500"
-    ],
-    sizes:[ {name:"Regular", price:230}, {name:"Large", price:280} ],
-    category:"Meals", available:true
-  },
-  {
-    id:"carbonara", name:"Carbonara", description:"Creamy classic pasta",
-    images:[
-      "https://picsum.photos/seed/carbonara-1/500/500",
-      "https://picsum.photos/seed/carbonara-2/500/500"
-    ],
-    sizes:[ {name:"Solo", price:220}, {name:"Sharing", price:340} ],
-    category:"Meals", available:true
-  },
-  {
-    id:"sisig", name:"Sisig", description:"Sizzling chopped pork",
-    images:[
-      "https://picsum.photos/seed/sisig-1/500/500",
-      "https://picsum.photos/seed/sisig-2/500/500",
-      "https://picsum.photos/seed/sisig-3/500/500"
-    ],
-    sizes:[ {name:"Regular", price:210}, {name:"Large", price:260} ],
-    category:"Meals", available:true
-  },
-  {
-    id:"halo-halo", name:"Halo-Halo", description:"Mixed shaved ice dessert",
-    images:[
-      "https://picsum.photos/seed/halo-halo-1/500/500",
-      "https://picsum.photos/seed/halo-halo-2/500/500"
-    ],
-    sizes:[ {name:"Regular", price:120} ],
-    category:"Desserts", available:true
-  },
-  {
-    id:"iced-tea", name:"Iced Tea", description:"House-blend iced tea",
-    images:[
-      "https://picsum.photos/seed/iced-tea-1/500/500",
-      "https://picsum.photos/seed/iced-tea-2/500/500"
-    ],
-    sizes:[ {name:"16oz", price:60}, {name:"22oz", price:80} ],
-    category:"Drinks", available:true
-  }
-];
-
 let products = [];
 let config = {};
 let openId = null;
@@ -493,10 +464,12 @@ if(FIREBASE_ENABLED){
       document.getElementById('app').hidden = false;
       document.getElementById('account-btn').hidden = false;
       registerAsAdmin(user);
+      localStorage.setItem(ADMIN_SESSION_KEY, '1');
       boot();
     } else {
       document.getElementById('app').hidden = true;
       document.getElementById('login-screen').hidden = false;
+      localStorage.removeItem(ADMIN_SESSION_KEY);
     }
   });
 }
@@ -557,6 +530,7 @@ function attemptLegacyLogin(){
   if(val === ADMIN_PASSWORD_FALLBACK){
     document.getElementById('login-screen').hidden = true;
     document.getElementById('app').hidden = false;
+    localStorage.setItem(ADMIN_SESSION_KEY, '1');
     boot();
   } else {
     document.getElementById('login-error-legacy').style.display = 'block';
@@ -571,6 +545,7 @@ function logOut(){
     document.getElementById('login-screen').hidden = false;
     document.getElementById('login-password-legacy').value = '';
     document.getElementById('login-error-legacy').style.display = 'none';
+    localStorage.removeItem(ADMIN_SESSION_KEY);
   }
 }
 
@@ -680,8 +655,10 @@ function loadProducts(){
   try{
     const raw = localStorage.getItem(PRODUCTS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    return (Array.isArray(parsed) && parsed.length) ? parsed : JSON.parse(JSON.stringify(DEFAULT_PRODUCTS));
-  }catch(e){ return JSON.parse(JSON.stringify(DEFAULT_PRODUCTS)); }
+    // No sample/default items — a brand-new store just starts with an empty
+    // menu and the admin adds real items with "+ Add New Food Item".
+    return (Array.isArray(parsed) && parsed.length) ? parsed : [];
+  }catch(e){ return []; }
 }
 function loadConfig(){
   try{
@@ -818,8 +795,11 @@ async function boot(){
   updateSyncBadge();
   products = loadProducts();
   config = loadConfig();
+  maintenanceMode = loadMaintenanceLocal().enabled;
+  maintenanceMessage = loadMaintenanceLocal().message;
   renderConfigUI();
   renderProducts();
+  renderMaintenanceUI();
 
   if(FIREBASE_ENABLED){
     try{
@@ -829,6 +809,8 @@ async function boot(){
       if(configSnap.exists){
         const data = configSnap.data();
         if(data.config) config = normalizeConfig({ ...DEFAULT_RESTAURANT_CONFIG, ...data.config });
+        if(typeof data.maintenanceMode === 'boolean') maintenanceMode = data.maintenanceMode;
+        if(typeof data.maintenanceMessage === 'string') maintenanceMessage = data.maintenanceMessage;
       }
 
       const productsSnap = await productsCollection().get();
@@ -848,13 +830,84 @@ async function boot(){
 
       localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(products));
       localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+      persistMaintenanceLocal();
       renderConfigUI();
       renderProducts();
+      renderMaintenanceUI();
     }catch(e){
       console.error(e);
       showToast("Couldn't reach cloud storage — showing the local copy");
     }
   }
+}
+
+/* ======================= MAINTENANCE MODE ======================= */
+let maintenanceMode = false;
+let maintenanceMessage = "";
+
+function loadMaintenanceLocal(){
+  try{
+    const raw = localStorage.getItem(MAINTENANCE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return {
+      enabled: !!(parsed && parsed.enabled),
+      message: (parsed && typeof parsed.message === 'string') ? parsed.message : ""
+    };
+  }catch(e){ return { enabled:false, message:"" }; }
+}
+function persistMaintenanceLocal(){
+  localStorage.setItem(MAINTENANCE_STORAGE_KEY, JSON.stringify({ enabled: maintenanceMode, message: maintenanceMessage }));
+}
+function renderMaintenanceUI(){
+  document.getElementById('maintenance-toggle').checked = maintenanceMode;
+  document.getElementById('maintenance-message-input').value = maintenanceMessage;
+  updateMaintenanceNote();
+}
+function updateMaintenanceNote(){
+  const note = document.getElementById('maintenance-note');
+  if(!note) return;
+  if(!FIREBASE_ENABLED){
+    note.textContent = maintenanceMode
+      ? "Maintenance is on for this device only — set up Firebase to hide the storefront for every visitor."
+      : "";
+    return;
+  }
+  note.textContent = maintenanceMode
+    ? "Customers see the maintenance page. You'll still see the real menu while logged in here."
+    : "";
+}
+
+// Toggling takes effect immediately (no separate save step) since it's a
+// binary switch customers are actively affected by.
+function toggleMaintenance(checked){
+  maintenanceMode = checked;
+  persistMaintenanceLocal();
+  updateMaintenanceNote();
+  if(!FIREBASE_ENABLED){
+    showToast(checked ? "Maintenance mode on (this device only)" : "Maintenance mode off");
+    return;
+  }
+  storeDoc().set({ maintenanceMode: checked }, { merge: true })
+    .then(()=> showToast(checked ? "Maintenance mode is on — customers now see the maintenance page" : "Maintenance mode is off"))
+    .catch(e=>{
+      console.error('Could not save maintenance mode', e);
+      showToast("Couldn't sync that — please try again");
+    });
+}
+
+function saveMaintenanceMessage(){
+  maintenanceMessage = document.getElementById('maintenance-message-input').value.trim();
+  persistMaintenanceLocal();
+  if(!FIREBASE_ENABLED){
+    showToast("Message saved (this device only)");
+    return;
+  }
+  storeDoc().set({ maintenanceMessage }, { merge: true })
+    .then(()=> showToast("Maintenance message saved"))
+    .catch(e=>{
+      console.error('Could not save maintenance message', e);
+      showToast("Couldn't sync that — please try again");
+    });
 }
 
 function saveConfig(){
@@ -1111,16 +1164,15 @@ function saveAll(){
   showToast("Menu saved — changes are live on the store");
 }
 
-function resetToDefaults(){
-  if(!confirm("Reset the entire menu back to the built-in defaults? Your edits will be lost.")) return;
-  products = JSON.parse(JSON.stringify(DEFAULT_PRODUCTS));
-  config = { ...DEFAULT_RESTAURANT_CONFIG };
+// Empties the menu entirely (no more sample/default food to "reset" back
+// to) — for starting over from scratch. Leaves Store Info untouched.
+function clearAllProducts(){
+  if(!confirm("Remove every item from the menu? This can't be undone.")) return;
+  products = [];
   persistProducts();
-  persistConfig();
-  renderConfigUI();
   openId = null;
   renderProducts();
-  showToast("Menu reset to defaults");
+  showToast("Menu cleared — add items with \"+ Add New Food Item\"");
 }
 
 /* ======================= TOAST ======================= */
