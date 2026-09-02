@@ -77,6 +77,22 @@
   </nav>
 
   <div class="section">
+    <div class="section-title">Store Status</div>
+    <div class="card" id="maintenance-card">
+      <div class="avail-toggle">
+        <input type="checkbox" id="maintenance-toggle" onchange="toggleMaintenance(this.checked)">
+        <label for="maintenance-toggle" style="margin:0;">Under Maintenance (hide storefront from customers)</label>
+      </div>
+      <div class="field" style="margin-top:10px;">
+        <label>Message shown to customers</label>
+        <textarea id="maintenance-message-input" rows="2" placeholder="We're doing some quick updates — back soon!"></textarea>
+      </div>
+      <button class="btn btn-secondary btn-block" onclick="saveMaintenanceMessage()">Save Message</button>
+      <p class="stat-publish-note" id="maintenance-note" style="margin-top:8px;"></p>
+    </div>
+  </div>
+
+  <div class="section">
     <div class="section-title">Store Info</div>
     <div class="card">
       <div class="field">
@@ -254,6 +270,12 @@ const ADMIN_PASSWORD_FALLBACK = "admin123";
 /* Must match the keys used in restaurant-webstore.html exactly. */
 const PRODUCTS_STORAGE_KEY = "myresto_products_v1";
 const CONFIG_STORAGE_KEY   = "myresto_config_v1";
+const MAINTENANCE_STORAGE_KEY = "myresto_maintenance_v1";
+// Set on every admin-panel login (here, orders.html, and stats.html) and
+// cleared on logout — index.html checks this on the same browser/device to
+// let the admin preview the real menu while maintenance mode is on for
+// everyone else.
+const ADMIN_SESSION_KEY = "myresto_admin_session_v1";
 
 /* ========================================================
    CLOUD SYNC (Firebase Firestore only — no Firebase Storage).
@@ -291,7 +313,7 @@ async function persistToCloud(){
     if(approxBytes > 900000){
       showToast("Menu is getting close to the storage limit — try removing a few extra photos");
     }
-    await storeDoc().set(payload);
+    await storeDoc().set(payload, { merge: true });
   }catch(e){
     console.error(e);
     showToast("Cloud sync failed — saved on this device only");
@@ -460,10 +482,12 @@ if(FIREBASE_ENABLED){
       document.getElementById('app').hidden = false;
       document.getElementById('account-btn').hidden = false;
       registerAsAdmin(user);
+      localStorage.setItem(ADMIN_SESSION_KEY, '1');
       boot();
     } else {
       document.getElementById('app').hidden = true;
       document.getElementById('login-screen').hidden = false;
+      localStorage.removeItem(ADMIN_SESSION_KEY);
     }
   });
 }
@@ -524,6 +548,7 @@ function attemptLegacyLogin(){
   if(val === ADMIN_PASSWORD_FALLBACK){
     document.getElementById('login-screen').hidden = true;
     document.getElementById('app').hidden = false;
+    localStorage.setItem(ADMIN_SESSION_KEY, '1');
     boot();
   } else {
     document.getElementById('login-error-legacy').style.display = 'block';
@@ -538,6 +563,7 @@ function logOut(){
     document.getElementById('login-screen').hidden = false;
     document.getElementById('login-password-legacy').value = '';
     document.getElementById('login-error-legacy').style.display = 'none';
+    localStorage.removeItem(ADMIN_SESSION_KEY);
   }
 }
 
@@ -785,8 +811,11 @@ async function boot(){
   updateSyncBadge();
   products = loadProducts();
   config = loadConfig();
+  maintenanceMode = loadMaintenanceLocal().enabled;
+  maintenanceMessage = loadMaintenanceLocal().message;
   renderConfigUI();
   renderProducts();
+  renderMaintenanceUI();
 
   if(FIREBASE_ENABLED){
     try{
@@ -795,16 +824,89 @@ async function boot(){
         const data = snap.data();
         if(Array.isArray(data.products) && data.products.length) products = data.products;
         if(data.config) config = normalizeConfig({ ...DEFAULT_RESTAURANT_CONFIG, ...data.config });
+        if(typeof data.maintenanceMode === 'boolean') maintenanceMode = data.maintenanceMode;
+        if(typeof data.maintenanceMessage === 'string') maintenanceMessage = data.maintenanceMessage;
         localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(products));
         localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+        persistMaintenanceLocal();
         renderConfigUI();
         renderProducts();
+        renderMaintenanceUI();
       }
     }catch(e){
       console.error(e);
       showToast("Couldn't reach cloud storage — showing the local copy");
     }
   }
+}
+
+/* ======================= MAINTENANCE MODE ======================= */
+let maintenanceMode = false;
+let maintenanceMessage = "";
+
+function loadMaintenanceLocal(){
+  try{
+    const raw = localStorage.getItem(MAINTENANCE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return {
+      enabled: !!(parsed && parsed.enabled),
+      message: (parsed && typeof parsed.message === 'string') ? parsed.message : ""
+    };
+  }catch(e){ return { enabled:false, message:"" }; }
+}
+function persistMaintenanceLocal(){
+  localStorage.setItem(MAINTENANCE_STORAGE_KEY, JSON.stringify({ enabled: maintenanceMode, message: maintenanceMessage }));
+}
+function renderMaintenanceUI(){
+  document.getElementById('maintenance-toggle').checked = maintenanceMode;
+  document.getElementById('maintenance-message-input').value = maintenanceMessage;
+  updateMaintenanceNote();
+}
+function updateMaintenanceNote(){
+  const note = document.getElementById('maintenance-note');
+  if(!note) return;
+  if(!FIREBASE_ENABLED){
+    note.textContent = maintenanceMode
+      ? "Maintenance is on for this device only — set up Firebase to hide the storefront for every visitor."
+      : "";
+    return;
+  }
+  note.textContent = maintenanceMode
+    ? "Customers see the maintenance page. You'll still see the real menu while logged in here."
+    : "";
+}
+
+// Toggling takes effect immediately (no separate save step) since it's a
+// binary switch customers are actively affected by.
+function toggleMaintenance(checked){
+  maintenanceMode = checked;
+  persistMaintenanceLocal();
+  updateMaintenanceNote();
+  if(!FIREBASE_ENABLED){
+    showToast(checked ? "Maintenance mode on (this device only)" : "Maintenance mode off");
+    return;
+  }
+  storeDoc().set({ maintenanceMode: checked }, { merge: true })
+    .then(()=> showToast(checked ? "Maintenance mode is on — customers now see the maintenance page" : "Maintenance mode is off"))
+    .catch(e=>{
+      console.error('Could not save maintenance mode', e);
+      showToast("Couldn't sync that — please try again");
+    });
+}
+
+function saveMaintenanceMessage(){
+  maintenanceMessage = document.getElementById('maintenance-message-input').value.trim();
+  persistMaintenanceLocal();
+  if(!FIREBASE_ENABLED){
+    showToast("Message saved (this device only)");
+    return;
+  }
+  storeDoc().set({ maintenanceMessage }, { merge: true })
+    .then(()=> showToast("Maintenance message saved"))
+    .catch(e=>{
+      console.error('Could not save maintenance message', e);
+      showToast("Couldn't sync that — please try again");
+    });
 }
 
 function saveConfig(){
