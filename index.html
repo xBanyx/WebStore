@@ -1399,22 +1399,23 @@ function applyPromoCode(){
     const err = promoValidationError(promo);
     if(err){ if(btn) btn.disabled = false; showPromoError(err); return; }
 
-    // "One redemption per device" codes need one more check that
+    // "One redemption per account" codes need one more check that
     // promoValidationError() can't do on its own (it has to stay
     // synchronous — it also runs on every cart re-render) — whether this
-    // browser already has a redeemedBy marker for this code. See
-    // saveOrder() for where that marker actually gets written.
+    // signed-in account already has a redeemedBy marker for this code.
+    // Keyed by uid (see saveOrder() below), not a device ID — this is only
+    // reachable while signed in, since promo codes require sign-in.
     if(!promo.oneTimePerDevice){
       finishApplyingPromo(promo, input, btn);
       return;
     }
-    promoRef.collection('redeemedBy').doc(getVisitorId()).get().then(markSnap=>{
+    promoRef.collection('redeemedBy').doc(currentUser.uid).get().then(markSnap=>{
       if(btn) btn.disabled = false;
       if(markSnap.exists){ showPromoError("You've already used this promo code."); return; }
       finishApplyingPromo(promo, input, btn);
     }).catch(e=>{
       if(btn) btn.disabled = false;
-      console.error('Could not check promo device usage', e);
+      console.error('Could not check promo redemption history', e);
       showPromoError("Couldn't check that code — please try again.");
     });
   }).catch(e=>{
@@ -1795,20 +1796,28 @@ function saveOrder(order){
   const payload = { ...record, createdAt: firebase.firestore.FieldValue.serverTimestamp() };
 
   if(!order.promoCode){
-    orderRef.set(payload).catch(e=>console.error('Could not sync order to cloud', e));
+    orderRef.set(payload).catch(e=>{
+      console.error('Could not sync order to cloud', e);
+      showToast("Order saved on this device, but couldn't sync online — please screenshot your receipt and let the store know.");
+    });
     return;
   }
 
-  // A promo code with a redemption limit (and/or a one-per-device limit)
+  // A promo code with a redemption limit (and/or a one-per-account limit)
   // needs its checks and the order write to happen as one atomic unit —
   // otherwise two requests racing for the last use of a limited code, or
-  // the same device double-submitting, could both get counted. If a limit
+  // the same account double-submitting, could both get counted. If a limit
   // happens to get hit between "Apply" and "Place Order," the order still
   // goes through at the price the customer saw (applyPromoCode() already
   // checked at the time they applied it) — it just isn't double-counted
   // against the limit here.
+  //
+  // Keyed by uid, not a localStorage device ID — promo codes require
+  // sign-in (see applyPromoCode()), so the account itself is the stronger,
+  // harder-to-reset identity to limit against; it follows the customer
+  // across devices instead of resetting when they clear browser data.
   const promoRef = db.collection('promoCodes').doc(order.promoCode);
-  const deviceMarkRef = promoRef.collection('redeemedBy').doc(getVisitorId());
+  const accountMarkRef = order.customerUid ? promoRef.collection('redeemedBy').doc(order.customerUid) : null;
   db.runTransaction(tx=>{
     return tx.get(promoRef).then(promoSnap=>{
       if(!promoSnap.exists){
@@ -1816,23 +1825,26 @@ function saveOrder(order){
         return;
       }
       const promo = promoSnap.data();
-      const needsDeviceCheck = !!promo.oneTimePerDevice;
+      const needsAccountCheck = !!promo.oneTimePerDevice && !!accountMarkRef;
       // All reads in a Firestore transaction must happen before any writes,
-      // so the (possibly skipped) device-marker read has to come before
+      // so the (possibly skipped) redemption-marker read has to come before
       // any tx.update/tx.set calls below.
-      return (needsDeviceCheck ? tx.get(deviceMarkRef) : Promise.resolve(null)).then(deviceSnap=>{
-        const deviceAlreadyUsed = needsDeviceCheck && deviceSnap && deviceSnap.exists;
+      return (needsAccountCheck ? tx.get(accountMarkRef) : Promise.resolve(null)).then(accountSnap=>{
+        const accountAlreadyUsed = needsAccountCheck && accountSnap && accountSnap.exists;
         const stillHasRoom = !promo.maxRedemptions || (promo.redeemedCount || 0) < promo.maxRedemptions;
-        if(stillHasRoom && !deviceAlreadyUsed){
+        if(stillHasRoom && !accountAlreadyUsed){
           tx.update(promoRef, { redeemedCount: firebase.firestore.FieldValue.increment(1) });
-          if(needsDeviceCheck){
-            tx.set(deviceMarkRef, { redeemedAt: firebase.firestore.FieldValue.serverTimestamp() });
+          if(needsAccountCheck){
+            tx.set(accountMarkRef, { redeemedAt: firebase.firestore.FieldValue.serverTimestamp() });
           }
         }
         tx.set(orderRef, payload);
       });
     });
-  }).catch(e=>console.error('Could not sync order to cloud', e));
+  }).catch(e=>{
+    console.error('Could not sync order to cloud', e);
+    showToast("Order saved on this device, but couldn't sync online — please screenshot your receipt and let the store know.");
+  });
 }
 
 /* ======================= SUCCESS + RECEIPT (HTML/CSS) ======================= */

@@ -275,9 +275,9 @@
     <div class="field">
       <label style="display:flex;align-items:center;gap:8px;font-weight:600;">
         <input type="checkbox" id="promo-one-per-device-field" style="width:auto;">
-        Limit to one redemption per device
+        Limit to one redemption per customer account
       </label>
-      <p class="field-hint">Blocks the same browser/device from using this code again — customers don't need an account for this. Clearing browser data or using a different device resets it, so it's not foolproof, but it stops casual reuse.</p>
+      <p class="field-hint">Promo codes require the customer to be signed in, so this ties the limit to their account (not just their browser) — it follows them across devices and survives clearing browser data.</p>
     </div>
     <div class="field">
       <label style="display:flex;align-items:center;gap:8px;font-weight:600;">
@@ -934,7 +934,7 @@ function renderPromos(){
         ${validityText(promo)}<br>
         ${redemptionText(promo)}
         ${promo.requiredSizeName ? `<br>Requires ${promo.requiredSizeQty || 1}× "${escapeAttr(promo.requiredSizeName)}" in cart` : ''}
-        ${promo.oneTimePerDevice ? `<br>One redemption per device` : ''}
+        ${promo.oneTimePerDevice ? `<br>One redemption per account` : ''}
       </div>
       <div class="promo-admin-actions">
         <button class="btn btn-secondary btn-sm" onclick="openPromoModal('${promo.code}')">Edit</button>
