@@ -274,6 +274,13 @@
     </div>
     <div class="field">
       <label style="display:flex;align-items:center;gap:8px;font-weight:600;">
+        <input type="checkbox" id="promo-one-per-device-field" style="width:auto;">
+        Limit to one redemption per device
+      </label>
+      <p class="field-hint">Blocks the same browser/device from using this code again — customers don't need an account for this. Clearing browser data or using a different device resets it, so it's not foolproof, but it stops casual reuse.</p>
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:600;">
         <input type="checkbox" id="promo-active-field" style="width:auto;" checked>
         Active
       </label>
@@ -927,6 +934,7 @@ function renderPromos(){
         ${validityText(promo)}<br>
         ${redemptionText(promo)}
         ${promo.requiredSizeName ? `<br>Requires ${promo.requiredSizeQty || 1}× "${escapeAttr(promo.requiredSizeName)}" in cart` : ''}
+        ${promo.oneTimePerDevice ? `<br>One redemption per device` : ''}
       </div>
       <div class="promo-admin-actions">
         <button class="btn btn-secondary btn-sm" onclick="openPromoModal('${promo.code}')">Edit</button>
@@ -980,6 +988,7 @@ function openPromoModal(code){
   document.getElementById('promo-max-field').value = promo && promo.maxRedemptions ? promo.maxRedemptions : '';
   document.getElementById('promo-size-name-field').value = promo ? (promo.requiredSizeName || '') : '';
   document.getElementById('promo-size-qty-field').value = promo && promo.requiredSizeQty ? promo.requiredSizeQty : '';
+  document.getElementById('promo-one-per-device-field').checked = promo ? !!promo.oneTimePerDevice : false;
   document.getElementById('promo-active-field').checked = promo ? promo.active !== false : true;
   document.getElementById('promo-modal-backdrop').hidden = false;
 }
@@ -999,6 +1008,7 @@ function savePromoCode(){
   const maxVal = document.getElementById('promo-max-field').value;
   const sizeName = document.getElementById('promo-size-name-field').value.trim();
   const sizeQtyVal = document.getElementById('promo-size-qty-field').value;
+  const oneTimePerDevice = document.getElementById('promo-one-per-device-field').checked;
   const active = document.getElementById('promo-active-field').checked;
 
   if(!code){ showToast('Enter a promo code'); return; }
@@ -1017,6 +1027,7 @@ function savePromoCode(){
     maxRedemptions: maxVal ? Math.max(1, Number(maxVal)) : null,
     requiredSizeName: sizeName || null,
     requiredSizeQty: sizeName ? Math.max(1, Number(sizeQtyVal) || 1) : null,
+    oneTimePerDevice,
     active
   };
   if(isNew) data.redeemedCount = 0;

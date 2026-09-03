@@ -1379,22 +1379,45 @@ function applyPromoCode(){
   const btn = document.getElementById('promo-apply-btn');
   if(btn) btn.disabled = true;
 
-  db.collection('promoCodes').doc(code).get().then(snap=>{
-    if(btn) btn.disabled = false;
-    if(!snap.exists){ showPromoError("That promo code doesn't exist."); return; }
+  const promoRef = db.collection('promoCodes').doc(code);
+  promoRef.get().then(snap=>{
+    if(!snap.exists){ if(btn) btn.disabled = false; showPromoError("That promo code doesn't exist."); return; }
     const promo = { code, ...snap.data() };
     const err = promoValidationError(promo);
-    if(err){ showPromoError(err); return; }
-    appliedPromo = promo;
-    input.value = '';
-    renderCart();
-    renderCheckout();
-    showToast(`Promo "${code}" applied!`);
+    if(err){ if(btn) btn.disabled = false; showPromoError(err); return; }
+
+    // "One redemption per device" codes need one more check that
+    // promoValidationError() can't do on its own (it has to stay
+    // synchronous — it also runs on every cart re-render) — whether this
+    // browser already has a redeemedBy marker for this code. See
+    // saveOrder() for where that marker actually gets written.
+    if(!promo.oneTimePerDevice){
+      finishApplyingPromo(promo, input, btn);
+      return;
+    }
+    promoRef.collection('redeemedBy').doc(getVisitorId()).get().then(markSnap=>{
+      if(btn) btn.disabled = false;
+      if(markSnap.exists){ showPromoError("You've already used this promo code."); return; }
+      finishApplyingPromo(promo, input, btn);
+    }).catch(e=>{
+      if(btn) btn.disabled = false;
+      console.error('Could not check promo device usage', e);
+      showPromoError("Couldn't check that code — please try again.");
+    });
   }).catch(e=>{
     if(btn) btn.disabled = false;
     console.error('Could not check promo code', e);
     showPromoError("Couldn't check that code — please try again.");
   });
+}
+
+function finishApplyingPromo(promo, input, btn){
+  if(btn) btn.disabled = false;
+  appliedPromo = promo;
+  input.value = '';
+  renderCart();
+  renderCheckout();
+  showToast(`Promo "${promo.code}" applied!`);
 }
 
 function showPromoError(msg){
@@ -1745,23 +1768,38 @@ function saveOrder(order){
     return;
   }
 
-  // A promo code with a redemption limit needs "is there still room?" and
-  // the order write to happen as one atomic unit — otherwise two customers
-  // racing for the last use of a limited code could both get it. If the
-  // code happens to run out between "Apply" and "Place Order," the order
-  // still goes through at the price the customer saw, it just isn't
-  // counted against the limit.
+  // A promo code with a redemption limit (and/or a one-per-device limit)
+  // needs its checks and the order write to happen as one atomic unit —
+  // otherwise two requests racing for the last use of a limited code, or
+  // the same device double-submitting, could both get counted. If a limit
+  // happens to get hit between "Apply" and "Place Order," the order still
+  // goes through at the price the customer saw (applyPromoCode() already
+  // checked at the time they applied it) — it just isn't double-counted
+  // against the limit here.
   const promoRef = db.collection('promoCodes').doc(order.promoCode);
+  const deviceMarkRef = promoRef.collection('redeemedBy').doc(getVisitorId());
   db.runTransaction(tx=>{
     return tx.get(promoRef).then(promoSnap=>{
-      if(promoSnap.exists){
-        const promo = promoSnap.data();
-        const stillHasRoom = !promo.maxRedemptions || (promo.redeemedCount || 0) < promo.maxRedemptions;
-        if(stillHasRoom){
-          tx.update(promoRef, { redeemedCount: firebase.firestore.FieldValue.increment(1) });
-        }
+      if(!promoSnap.exists){
+        tx.set(orderRef, payload);
+        return;
       }
-      tx.set(orderRef, payload);
+      const promo = promoSnap.data();
+      const needsDeviceCheck = !!promo.oneTimePerDevice;
+      // All reads in a Firestore transaction must happen before any writes,
+      // so the (possibly skipped) device-marker read has to come before
+      // any tx.update/tx.set calls below.
+      return (needsDeviceCheck ? tx.get(deviceMarkRef) : Promise.resolve(null)).then(deviceSnap=>{
+        const deviceAlreadyUsed = needsDeviceCheck && deviceSnap && deviceSnap.exists;
+        const stillHasRoom = !promo.maxRedemptions || (promo.redeemedCount || 0) < promo.maxRedemptions;
+        if(stillHasRoom && !deviceAlreadyUsed){
+          tx.update(promoRef, { redeemedCount: firebase.firestore.FieldValue.increment(1) });
+          if(needsDeviceCheck){
+            tx.set(deviceMarkRef, { redeemedAt: firebase.firestore.FieldValue.serverTimestamp() });
+          }
+        }
+        tx.set(orderRef, payload);
+      });
     });
   }).catch(e=>console.error('Could not sync order to cloud', e));
 }
