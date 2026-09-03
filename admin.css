@@ -365,7 +365,7 @@
   .receipt-qr-img{
     display:block;margin:0 auto;object-fit:contain;
     /* Physical size regardless of paper width — big enough to scan reliably. */
-    width:0.9in;height:0.9in;
+    width:1.25in;height:1.25in;
   }
   .receipt-qr-label{font-size:0.85em;margin-top:3px;}
   .receipt-footer{margin-top:6px;font-size:0.85em;}
