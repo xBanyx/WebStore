@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>RHJ WebStore</title>
 <link rel="icon" type="image/x-icon" href="rhj_icon.ico">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Fraunces carries the menu's personality (brand name, category headings,
+     dish names) — a warm, slightly expressive serif suited to a home-style
+     Filipino spread. Everything functional (buttons, prices, form fields)
+     stays in the original clean system sans for legibility at small sizes. -->
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="restaurant-webstore.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
@@ -379,6 +386,8 @@ if(FIREBASE_ENABLED){
   auth.onAuthStateChanged(user=>{
     currentUser = user;
     updateSignInUI();
+    renderCart();      // swaps the promo box between "sign in to apply a code" and the input
+    renderCheckout();
     if(user) document.getElementById('gate-screen').hidden = true; // signing in from the gate itself closes it
     authReady = true;
     tryFinishBoot();
@@ -1374,6 +1383,10 @@ function applyPromoCode(){
     showPromoError('Promo codes need this store to be online — please try again shortly.');
     return;
   }
+  if(!currentUser){
+    showPromoError('Please sign in to use a promo code.');
+    return;
+  }
 
   const code = raw.toUpperCase();
   const btn = document.getElementById('promo-apply-btn');
@@ -1500,6 +1513,24 @@ function renderPromoBox(t){
         </div>
       </div>`;
   }
+
+  // Promo codes are for signed-in customers only — the redemption limits
+  // (total uses, one-per-device) only mean something if we know who's
+  // asking, and guest checkout has no identity to attach that to. See
+  // applyPromoCode() for the matching server-side check.
+  if(FIREBASE_ENABLED && !currentUser){
+    return `
+      <div class="promo-box">
+        <div class="signin-card">
+          <div>
+            <strong>Have a promo code?</strong>
+            <p>Sign in with Google to apply one.</p>
+          </div>
+          <button class="btn btn-primary" onclick="signInWithGoogle()">Sign In</button>
+        </div>
+      </div>`;
+  }
+
   return `
     <div class="promo-box">
       <div class="promo-input-row">
