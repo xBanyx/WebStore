@@ -249,6 +249,8 @@ function loadBestSellersEnabledLocal(){
 let PRODUCTS = [];
 let ORDERS = [];
 let bestSellersEnabled = true;
+let presenceDocs = [];  // raw presence/{visitorId} docs, filtered to "online" at render time
+let totalVisits = 0;
 
 async function boot(){
   updateSyncBadge();
@@ -281,7 +283,28 @@ async function boot(){
       console.error('Order sync error:', err);
       showToast("Couldn't reach cloud storage — showing the local copy");
     });
+
+    // "Online Now" — see the VISITOR TRACKING comment in index.html for how
+    // these heartbeats get written. Re-rendering on a timer (not just on
+    // snapshot) is what actually ages someone out of "online" once their
+    // last heartbeat passes 60s, even if nobody else's presence doc changes.
+    db.collection('presence').onSnapshot(snap=>{
+      presenceDocs = snap.docs.map(d => d.data());
+      renderStats();
+    }, err=>console.error('Presence sync error:', err));
+    setInterval(renderStats, 15000);
+
+    // "Total Visits" — single running counter, see index.html.
+    db.collection('stats').doc('visits').onSnapshot(snap=>{
+      totalVisits = (snap.exists && snap.data().total) || 0;
+      renderStats();
+    }, err=>console.error('Visits sync error:', err));
   }
+}
+
+function countOnline(){
+  const cutoff = Date.now() - 60000; // no heartbeat in the last minute = offline
+  return presenceDocs.filter(p => p.lastSeen && p.lastSeen.toDate().getTime() > cutoff).length;
 }
 
 // Admin-controlled on/off switch for the storefront badge. The stats page
@@ -364,6 +387,10 @@ function renderStats(){
     <div class="stat-card"><div class="stat-value">${money(stats.totalRevenue)}</div><div class="stat-label">Revenue (completed)</div></div>
     <div class="stat-card"><div class="stat-value">${stats.totalItemsSold}</div><div class="stat-label">Items Sold</div></div>
     <div class="stat-card"><div class="stat-value">${stats.avgRating != null ? stats.avgRating.toFixed(1) + ' ★' : '—'}</div><div class="stat-label">Avg Rating (${stats.ratedCount} rated)</div></div>
+    ${FIREBASE_ENABLED ? `
+      <div class="stat-card"><div class="stat-value">${countOnline()}</div><div class="stat-label">Online Now</div></div>
+      <div class="stat-card"><div class="stat-value">${totalVisits.toLocaleString()}</div><div class="stat-label">Total Visits</div></div>
+    ` : ''}
   `;
 
   const catsWrap = document.getElementById('stat-categories');
