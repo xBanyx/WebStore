@@ -205,6 +205,16 @@
     </div>
   </div>
 
+  <!-- PROMO CODES -->
+  <div class="section">
+    <div class="section-title">Promo Codes</div>
+    <div class="card" id="promo-firebase-note" hidden>
+      <p class="field-hint" style="margin:0;">Promo codes need cloud sync (Firebase) so the same code, redemption count, and time window work for every visitor — set that up first to use this.</p>
+    </div>
+    <div id="promo-list"></div>
+    <button class="btn btn-secondary btn-block" id="add-promo-btn" onclick="openPromoModal()">+ Add Promo Code</button>
+  </div>
+
   <!-- MENU ITEMS -->
   <div class="section">
     <div class="section-title">Menu Items</div>
@@ -219,6 +229,58 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- ============== PROMO CODE MODAL ============== -->
+<div class="modal-backdrop" id="promo-modal-backdrop" hidden onclick="if(event.target===this) closePromoModal()">
+  <div class="modal-sheet">
+    <div class="modal-sheet-header">
+      <h3 id="promo-modal-title">Add Promo Code</h3>
+      <button class="modal-close" onclick="closePromoModal()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="field">
+      <label>Code</label>
+      <input type="text" id="promo-code-field" placeholder="e.g. FIESTA20" style="text-transform:uppercase;">
+    </div>
+    <div class="field">
+      <label>Discount Type</label>
+      <select id="promo-type-field" onchange="updatePromoValueLabel()">
+        <option value="percent">Percent off</option>
+        <option value="fixed">Fixed amount off</option>
+      </select>
+    </div>
+    <div class="field">
+      <label id="promo-value-label">Discount Value (%)</label>
+      <input type="number" id="promo-value-field" min="0" step="1">
+    </div>
+    <div class="field">
+      <label>Starts <span style="font-weight:400;color:var(--muted,#8a8078);">(optional — leave blank to start immediately)</span></label>
+      <input type="datetime-local" id="promo-start-field">
+    </div>
+    <div class="field">
+      <label>Expires <span style="font-weight:400;color:var(--muted,#8a8078);">(optional — leave blank for no expiry)</span></label>
+      <input type="datetime-local" id="promo-end-field">
+    </div>
+    <div class="field">
+      <label>Max Redemptions <span style="font-weight:400;color:var(--muted,#8a8078);">(optional — leave blank for unlimited)</span></label>
+      <input type="number" id="promo-max-field" min="1" step="1" placeholder="Unlimited">
+    </div>
+    <div class="field">
+      <label>Only applies with a minimum quantity of one size <span style="font-weight:400;color:var(--muted,#8a8078);">(optional — e.g. requires 3 "Large Bilao" in the cart)</span></label>
+      <div class="add-image-row">
+        <input type="text" id="promo-size-name-field" placeholder="Size name, e.g. Large Bilao" style="flex:2;">
+        <input type="number" id="promo-size-qty-field" placeholder="Qty" min="1" step="1" style="flex:1;">
+      </div>
+      <p class="field-hint">Must match a size name on your menu items exactly (not case-sensitive). Leave blank to let the code apply to any order.</p>
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:600;">
+        <input type="checkbox" id="promo-active-field" style="width:auto;" checked>
+        Active
+      </label>
+    </div>
+    <button class="btn btn-primary btn-block" onclick="savePromoCode()">Save Promo Code</button>
+  </div>
+</div>
 
 <!-- ============== ACCOUNT MODAL ============== -->
 <div class="modal-backdrop" id="account-modal-backdrop" hidden onclick="if(event.target===this) closeAccountModal()">
@@ -821,6 +883,167 @@ function removeBlackoutDate(value){
   renderBlackoutUI();
   showToast("Date unblocked");
 }
+
+/* ======================= PROMO CODES =======================
+   Each code is its own doc at promoCodes/{CODE} (the code itself is the
+   doc ID, so codes are automatically unique and cheap to look up by name
+   from the storefront). See index.html for how a code actually gets
+   validated and redeemed at checkout — this is just the admin CRUD.
+   Cloud-only feature: a redemption limit or "3 Large Bilao" condition
+   only means anything if every visitor's browser is checking the same
+   shared data, so this is hidden entirely without Firebase configured.
+*/
+let PROMOS = [];
+let editingPromoCode = null;
+function promosCollection(){ return db.collection('promoCodes'); }
+
+function loadPromos(){
+  document.getElementById('promo-firebase-note').hidden = FIREBASE_ENABLED;
+  document.getElementById('add-promo-btn').hidden = !FIREBASE_ENABLED;
+  if(!FIREBASE_ENABLED) return;
+  promosCollection().onSnapshot(snap=>{
+    PROMOS = snap.docs.map(d => d.data()).sort((a,b) => (a.code||'').localeCompare(b.code||''));
+    renderPromos();
+  }, err=>console.error('Could not load promo codes', err));
+}
+
+function renderPromos(){
+  const list = document.getElementById('promo-list');
+  if(!PROMOS.length){
+    list.innerHTML = `<p class="banners-empty">No promo codes yet.</p>`;
+    return;
+  }
+  list.innerHTML = PROMOS.map(promo => `
+    <div class="card promo-admin-card">
+      <div class="promo-admin-head">
+        <div>
+          <div class="promo-admin-code">${escapeAttr(promo.code)}</div>
+          <div class="promo-admin-desc">${describePromo(promo)}</div>
+        </div>
+        <input type="checkbox" ${promo.active !== false ? 'checked' : ''} title="Active"
+          onchange="togglePromoActive('${promo.code}', this.checked)">
+      </div>
+      <div class="promo-admin-meta">
+        ${validityText(promo)}<br>
+        ${redemptionText(promo)}
+        ${promo.requiredSizeName ? `<br>Requires ${promo.requiredSizeQty || 1}× "${escapeAttr(promo.requiredSizeName)}" in cart` : ''}
+      </div>
+      <div class="promo-admin-actions">
+        <button class="btn btn-secondary btn-sm" onclick="openPromoModal('${promo.code}')">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deletePromoCode('${promo.code}')">Delete</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function describePromo(promo){
+  return promo.type === 'fixed' ? `₱${promo.value} off` : `${promo.value}% off`;
+}
+function validityText(promo){
+  const fmt = iso => new Date(iso).toLocaleString('en-PH', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+  if(!promo.startAt && !promo.endAt) return 'No time limit';
+  if(promo.startAt && promo.endAt) return `Valid ${fmt(promo.startAt)} – ${fmt(promo.endAt)}`;
+  if(promo.startAt) return `Starts ${fmt(promo.startAt)}`;
+  return `Expires ${fmt(promo.endAt)}`;
+}
+function redemptionText(promo){
+  const used = promo.redeemedCount || 0;
+  return promo.maxRedemptions ? `${used} / ${promo.maxRedemptions} redeemed` : `${used} redeemed · unlimited`;
+}
+
+// datetime-local inputs need "YYYY-MM-DDTHH:mm" in local time — new
+// Date(iso).toISOString() would shift it to UTC and show the wrong time.
+function toLocalInputValue(iso){
+  const d = new Date(iso);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function updatePromoValueLabel(){
+  const type = document.getElementById('promo-type-field').value;
+  document.getElementById('promo-value-label').textContent = type === 'fixed' ? 'Discount Value (₱)' : 'Discount Value (%)';
+}
+
+function openPromoModal(code){
+  editingPromoCode = code || null;
+  const promo = code ? PROMOS.find(p => p.code === code) : null;
+
+  document.getElementById('promo-modal-title').textContent = code ? 'Edit Promo Code' : 'Add Promo Code';
+  const codeField = document.getElementById('promo-code-field');
+  codeField.value = promo ? promo.code : '';
+  codeField.disabled = !!promo; // the code is the doc ID — don't allow changing it after creation
+  document.getElementById('promo-type-field').value = promo ? promo.type : 'percent';
+  updatePromoValueLabel();
+  document.getElementById('promo-value-field').value = promo ? promo.value : '';
+  document.getElementById('promo-start-field').value = promo && promo.startAt ? toLocalInputValue(promo.startAt) : '';
+  document.getElementById('promo-end-field').value = promo && promo.endAt ? toLocalInputValue(promo.endAt) : '';
+  document.getElementById('promo-max-field').value = promo && promo.maxRedemptions ? promo.maxRedemptions : '';
+  document.getElementById('promo-size-name-field').value = promo ? (promo.requiredSizeName || '') : '';
+  document.getElementById('promo-size-qty-field').value = promo && promo.requiredSizeQty ? promo.requiredSizeQty : '';
+  document.getElementById('promo-active-field').checked = promo ? promo.active !== false : true;
+  document.getElementById('promo-modal-backdrop').hidden = false;
+}
+
+function closePromoModal(){
+  document.getElementById('promo-modal-backdrop').hidden = true;
+  document.getElementById('promo-code-field').disabled = false;
+  editingPromoCode = null;
+}
+
+function savePromoCode(){
+  const code = document.getElementById('promo-code-field').value.trim().toUpperCase();
+  const type = document.getElementById('promo-type-field').value;
+  const value = Number(document.getElementById('promo-value-field').value);
+  const startVal = document.getElementById('promo-start-field').value;
+  const endVal = document.getElementById('promo-end-field').value;
+  const maxVal = document.getElementById('promo-max-field').value;
+  const sizeName = document.getElementById('promo-size-name-field').value.trim();
+  const sizeQtyVal = document.getElementById('promo-size-qty-field').value;
+  const active = document.getElementById('promo-active-field').checked;
+
+  if(!code){ showToast('Enter a promo code'); return; }
+  if(!/^[A-Z0-9_-]+$/.test(code)){ showToast('Codes can only use letters, numbers, - and _'); return; }
+  if(!value || value <= 0){ showToast('Enter a discount value greater than 0'); return; }
+  if(type === 'percent' && value > 100){ showToast("Percent discount can't be more than 100"); return; }
+  if(startVal && endVal && new Date(startVal) >= new Date(endVal)){ showToast('Expiry must be after the start time'); return; }
+
+  const isNew = !editingPromoCode;
+  const data = {
+    code,
+    type,
+    value,
+    startAt: startVal ? new Date(startVal).toISOString() : null,
+    endAt: endVal ? new Date(endVal).toISOString() : null,
+    maxRedemptions: maxVal ? Math.max(1, Number(maxVal)) : null,
+    requiredSizeName: sizeName || null,
+    requiredSizeQty: sizeName ? Math.max(1, Number(sizeQtyVal) || 1) : null,
+    active
+  };
+  if(isNew) data.redeemedCount = 0;
+
+  promosCollection().doc(code).set(data, { merge: true })
+    .then(()=>{
+      showToast(isNew ? 'Promo code created' : 'Promo code updated');
+      closePromoModal();
+    })
+    .catch(e=>{
+      console.error('Could not save promo code', e);
+      showToast("Couldn't save that promo code — please try again");
+    });
+}
+
+function togglePromoActive(code, active){
+  promosCollection().doc(code).update({ active })
+    .catch(e=>{ console.error('Could not update promo code', e); showToast("Couldn't update — please try again"); });
+}
+
+function deletePromoCode(code){
+  if(!confirm(`Delete promo code ${code}? This can't be undone.`)) return;
+  promosCollection().doc(code).delete()
+    .then(()=>showToast('Promo code deleted'))
+    .catch(e=>{ console.error('Could not delete promo code', e); showToast("Couldn't delete — please try again"); });
+}
+
 function renderBannersUI(){
   const list = document.getElementById('cfg-banners-list');
   const banners = config.banners && config.banners.length ? config.banners : [];
@@ -841,6 +1064,7 @@ async function boot(){
   renderConfigUI();
   renderProducts();
   renderMaintenanceUI();
+  loadPromos();
 
   if(FIREBASE_ENABLED){
     try{

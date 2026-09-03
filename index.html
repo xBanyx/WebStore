@@ -375,6 +375,7 @@ if(FIREBASE_ENABLED){
   db = firebase.firestore();
   auth = firebase.auth();
   auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+  initVisitorTracking();
   auth.onAuthStateChanged(user=>{
     currentUser = user;
     updateSignInUI();
@@ -396,6 +397,56 @@ if(FIREBASE_ENABLED){
   });
 }
 function storeDoc(){ return db.collection('stores').doc('main'); }
+
+/* ======================= VISITOR TRACKING (feeds "Online Now" / "Total Visits" on Statistics) =======================
+   No server/Cloud Functions in this project, so this is all done with
+   plain Firestore writes from the browser:
+
+   - PRESENCE: this tab writes a heartbeat to presence/{visitorId} every
+     20s while the page is open. There's no reliable way for a closed tab
+     to tell Firestore "I left" (no onDisconnect like the Realtime
+     Database has), so stats.html instead treats a visitor as "online"
+     if their last heartbeat is under a minute old, and just ignores
+     older ones. The Firestore rules only allow writing the lastSeen
+     field, stamped with the server's own clock (request.time) — a
+     visitor can't fake being "online" by writing an arbitrary timestamp.
+
+   - VISITS: counted once per browser tab session (sessionStorage flag),
+     not once per page load — so refreshing or clicking around the menu
+     doesn't inflate the number. Uses an atomic Firestore increment so
+     many visitors counting a visit at once can't overwrite each other.
+*/
+function getVisitorId(){
+  let id = localStorage.getItem('myresto_visitor_id');
+  if(!id){
+    id = 'v_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    try{ localStorage.setItem('myresto_visitor_id', id); }catch(e){ /* private browsing etc. — id just won't persist across visits */ }
+  }
+  return id;
+}
+
+function sendHeartbeat(){
+  db.collection('presence').doc(getVisitorId()).set({
+    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge: true }).catch(e => console.error('Presence heartbeat failed', e));
+}
+
+function initVisitorTracking(){
+  sendHeartbeat();
+  setInterval(sendHeartbeat, 20000);
+  // Coming back to this tab after a while (e.g. it was in the background)
+  // gets a fresh heartbeat right away instead of waiting for the next tick.
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState === 'visible') sendHeartbeat();
+  });
+
+  if(!sessionStorage.getItem('myresto_visit_counted')){
+    try{ sessionStorage.setItem('myresto_visit_counted', '1'); }catch(e){}
+    db.collection('stats').doc('visits').set({
+      total: firebase.firestore.FieldValue.increment(1)
+    }, { merge: true }).catch(e => console.error('Could not record visit', e));
+  }
+}
 
 /* ======================= MY ORDERS NOTIFICATION BADGE =======================
    Compares each of the signed-in customer's orders against what they've
@@ -674,6 +725,7 @@ let cart = [];
 let lastOrder = null;
 let cartIdSeq = 1;
 let fulfillmentType = 'pickup'; // 'pickup' or 'delivery' — only relevant when RESTAURANT_CONFIG.delivery.enabled
+let appliedPromo = null; // set by applyPromoCode() below — the validated promoCodes/{code} doc, or null
 
 function setFulfillmentType(type){
   fulfillmentType = type;
@@ -1261,9 +1313,101 @@ function updateCartCount(animate){
 function cartTotals(){
   const subtotal = cart.reduce((a,l)=>a + l.unitPrice*l.qty, 0);
   const delivery = (RESTAURANT_CONFIG.delivery.enabled && fulfillmentType === 'delivery' && subtotal>0 && deliveryQuote) ? deliveryQuote.fee : 0;
-  const discount = DISCOUNT_CONFIG.enabled ? DISCOUNT_CONFIG.amount : 0;
+  const storeDiscount = DISCOUNT_CONFIG.enabled ? DISCOUNT_CONFIG.amount : 0;
+
+  // A promo code stays "applied" even if the cart changes underneath it
+  // (e.g. the customer removes the Large Bilao that qualified it) — rather
+  // than silently un-applying, we keep it visible with an explanation and
+  // simply stop granting the discount until the cart qualifies again.
+  let promoDiscount = 0;
+  const promoError = appliedPromo ? promoValidationError(appliedPromo) : null;
+  if(appliedPromo && !promoError){
+    promoDiscount = appliedPromo.type === 'percent'
+      ? subtotal * (appliedPromo.value / 100)
+      : appliedPromo.value;
+    promoDiscount = Math.max(0, Math.min(promoDiscount, subtotal));
+  }
+
+  const discount = storeDiscount + promoDiscount;
   const total = Math.max(0, subtotal + delivery - discount);
-  return { subtotal, delivery, discount, total };
+  return { subtotal, delivery, storeDiscount, promoDiscount, promoError, discount, total };
+}
+
+/* ======================= PROMO CODES =======================
+   Codes live in Firestore at promoCodes/{CODE}. A code can be time-limited
+   (startAt/endAt), capped to a number of uses (maxRedemptions), and/or
+   require a minimum quantity of a specific size in the cart — e.g. "only
+   discounts orders with 3+ Large Bilao" — via requiredSizeName /
+   requiredSizeQty. See admin.html's Promo Codes section for how these get
+   created, and saveOrder() below for how a redemption is actually counted
+   (atomically, via a Firestore transaction, at the moment the order is
+   placed — not when the code is applied, so two people racing for the
+   last use of a limited code can't both win).
+
+   Returns an error string explaining why a promo can't be used right now,
+   or null if it's good to go.
+*/
+function promoValidationError(promo){
+  const now = Date.now();
+  if(promo.active === false) return 'This promo code is no longer active.';
+  if(promo.startAt && now < new Date(promo.startAt).getTime()) return "This promo code isn't active yet.";
+  if(promo.endAt && now > new Date(promo.endAt).getTime()) return 'This promo code has expired.';
+  if(promo.maxRedemptions && (promo.redeemedCount || 0) >= promo.maxRedemptions) return 'This promo code has reached its redemption limit.';
+  if(promo.requiredSizeName && promo.requiredSizeQty > 0){
+    const have = cart
+      .filter(l => (l.sizeName || '').trim().toLowerCase() === promo.requiredSizeName.trim().toLowerCase())
+      .reduce((a,l) => a + l.qty, 0);
+    if(have < promo.requiredSizeQty){
+      return `Needs at least ${promo.requiredSizeQty} "${promo.requiredSizeName}" in your cart (you have ${have}).`;
+    }
+  }
+  return null;
+}
+
+function applyPromoCode(){
+  const input = document.getElementById('promo-code-input');
+  if(!input) return;
+  const raw = input.value.trim();
+  if(!raw) return;
+
+  if(!FIREBASE_ENABLED){
+    showPromoError('Promo codes need this store to be online — please try again shortly.');
+    return;
+  }
+
+  const code = raw.toUpperCase();
+  const btn = document.getElementById('promo-apply-btn');
+  if(btn) btn.disabled = true;
+
+  db.collection('promoCodes').doc(code).get().then(snap=>{
+    if(btn) btn.disabled = false;
+    if(!snap.exists){ showPromoError("That promo code doesn't exist."); return; }
+    const promo = { code, ...snap.data() };
+    const err = promoValidationError(promo);
+    if(err){ showPromoError(err); return; }
+    appliedPromo = promo;
+    input.value = '';
+    renderCart();
+    renderCheckout();
+    showToast(`Promo "${code}" applied!`);
+  }).catch(e=>{
+    if(btn) btn.disabled = false;
+    console.error('Could not check promo code', e);
+    showPromoError("Couldn't check that code — please try again.");
+  });
+}
+
+function showPromoError(msg){
+  const errEl = document.getElementById('promo-code-error');
+  if(!errEl) return;
+  errEl.textContent = msg;
+  errEl.style.display = 'block';
+}
+
+function removePromoCode(){
+  appliedPromo = null;
+  renderCart();
+  renderCheckout();
 }
 
 function renderCart(){
@@ -1307,12 +1451,41 @@ function renderCart(){
   if(RESTAURANT_CONFIG.delivery.enabled && fulfillmentType === 'delivery'){
     summaryHtml += `<div class="summary-row"><span>Delivery Fee</span><span>${deliveryQuote ? money(t.delivery) : 'Calculate at checkout'}</span></div>`;
   }
-  if(DISCOUNT_CONFIG.enabled && t.discount>0){
+  if(t.discount>0){
     summaryHtml += `<div class="summary-row"><span>Discount</span><span>-${money(t.discount)}</span></div>`;
   }
   summaryHtml += `<div class="summary-row total"><span>Total</span><span>${money(t.total)}</span></div></div>`;
+  summaryHtml += renderPromoBox(t);
 
   wrap.innerHTML = itemsHtml + summaryHtml;
+}
+
+// Shared by the cart view and (read-only) the checkout view. When a promo
+// is applied but no longer qualifies (cart changed since applying it), it
+// stays visible with a warning instead of silently vanishing — that way
+// the discount disappearing from the total isn't a mystery.
+function renderPromoBox(t){
+  if(appliedPromo){
+    return `
+      <div class="promo-box">
+        <div class="promo-applied-row">
+          <span>
+            <i class="fa-solid fa-tag"></i> ${appliedPromo.code}
+            ${t.promoError ? `<span class="promo-warning">${t.promoError}</span>` : ''}
+          </span>
+          <button class="promo-remove-btn" onclick="removePromoCode()">Remove</button>
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="promo-box">
+      <div class="promo-input-row">
+        <input type="text" id="promo-code-input" placeholder="Promo code" maxlength="30"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();applyPromoCode();}">
+        <button class="btn btn-secondary" id="promo-apply-btn" onclick="applyPromoCode()">Apply</button>
+      </div>
+      <div class="promo-error" id="promo-code-error" style="display:none;"></div>
+    </div>`;
 }
 
 /* ======================= CHECKOUT ======================= */
@@ -1336,8 +1509,11 @@ function renderCheckout(){
   if(RESTAURANT_CONFIG.delivery.enabled && fulfillmentType === 'delivery'){
     totalsHtml += `<div class="summary-row"><span>Delivery Fee</span><span>${deliveryQuote ? money(t.delivery) : 'Not calculated yet'}</span></div>`;
   }
-  if(DISCOUNT_CONFIG.enabled && t.discount>0){
-    totalsHtml += `<div class="summary-row"><span>Discount</span><span>-${money(t.discount)}</span></div>`;
+  if(t.discount>0){
+    totalsHtml += `<div class="summary-row"><span>Discount${appliedPromo ? ` (${appliedPromo.code})` : ''}</span><span>-${money(t.discount)}</span></div>`;
+  }
+  if(appliedPromo && t.promoError){
+    totalsHtml += `<div class="summary-row"><span class="promo-warning">${t.promoError}</span><span></span></div>`;
   }
   totalsHtml += `<div class="summary-row total"><span>Total</span><span>${money(t.total)}</span></div>`;
   document.getElementById('checkout-totals').innerHTML = totalsHtml;
@@ -1496,6 +1672,15 @@ function placeOrder(){
       status: "pending"
     };
 
+    // Only record the promo if it's still valid at the moment of
+    // submission (t.promoDiscount is 0 if promoValidationError() failed) —
+    // saveOrder() uses lastOrder.promoCode to know whether to run the
+    // redemption-counting transaction at all.
+    if(appliedPromo && t.promoDiscount > 0){
+      lastOrder.promoCode = appliedPromo.code;
+      lastOrder.promoDiscount = Math.round(t.promoDiscount * 100) / 100;
+    }
+
     if(orderNotes){
       lastOrder.customerNote = orderNotes;
     }
@@ -1513,6 +1698,7 @@ function placeOrder(){
     saveOrder(lastOrder);
 
     cart = [];
+    appliedPromo = null;
     updateCartCount();
     btn.disabled = false;
     btn.textContent = "Place Order";
@@ -1549,12 +1735,35 @@ function saveOrder(order){
     console.error('Could not save order locally', e);
   }
 
-  if(FIREBASE_ENABLED){
-    db.collection('orders').doc(order.orderNumber).set({
-      ...record,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    }).catch(e=>console.error('Could not sync order to cloud', e));
+  if(!FIREBASE_ENABLED) return;
+
+  const orderRef = db.collection('orders').doc(order.orderNumber);
+  const payload = { ...record, createdAt: firebase.firestore.FieldValue.serverTimestamp() };
+
+  if(!order.promoCode){
+    orderRef.set(payload).catch(e=>console.error('Could not sync order to cloud', e));
+    return;
   }
+
+  // A promo code with a redemption limit needs "is there still room?" and
+  // the order write to happen as one atomic unit — otherwise two customers
+  // racing for the last use of a limited code could both get it. If the
+  // code happens to run out between "Apply" and "Place Order," the order
+  // still goes through at the price the customer saw, it just isn't
+  // counted against the limit.
+  const promoRef = db.collection('promoCodes').doc(order.promoCode);
+  db.runTransaction(tx=>{
+    return tx.get(promoRef).then(promoSnap=>{
+      if(promoSnap.exists){
+        const promo = promoSnap.data();
+        const stillHasRoom = !promo.maxRedemptions || (promo.redeemedCount || 0) < promo.maxRedemptions;
+        if(stillHasRoom){
+          tx.update(promoRef, { redeemedCount: firebase.firestore.FieldValue.increment(1) });
+        }
+      }
+      tx.set(orderRef, payload);
+    });
+  }).catch(e=>console.error('Could not sync order to cloud', e));
 }
 
 /* ======================= SUCCESS + RECEIPT (HTML/CSS) ======================= */
@@ -1586,8 +1795,8 @@ function renderSuccess(order){
   if(order.fulfillmentType === 'delivery'){
     totalsHtml += `<div><span>Delivery Fee</span><span>${money(order.delivery)}</span></div>`;
   }
-  if(DISCOUNT_CONFIG.enabled && order.discount>0){
-    totalsHtml += `<div><span>Discount</span><span>-${money(order.discount)}</span></div>`;
+  if(order.discount>0){
+    totalsHtml += `<div><span>Discount${order.promoCode ? ` (${order.promoCode})` : ''}</span><span>-${money(order.discount)}</span></div>`;
   }
   totalsHtml += `<div class="r-grand"><span>TOTAL</span><span>${money(order.total)}</span></div>`;
 

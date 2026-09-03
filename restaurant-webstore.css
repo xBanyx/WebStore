@@ -198,6 +198,26 @@
     font-size:17px;font-weight:800;color:var(--text);
   }
 
+  .promo-box{margin:12px 16px 0;}
+  .promo-input-row{display:flex;gap:8px;}
+  .promo-input-row input{
+    flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:10px;
+    font-size:13.5px;font-family:inherit;background:var(--card);color:var(--text);
+  }
+  .promo-input-row input:focus{outline:none;border-color:var(--primary);}
+  .promo-input-row .btn{padding:10px 16px;font-size:13px;white-space:nowrap;}
+  .promo-error{color:#b23b3b;font-size:12px;margin-top:6px;}
+  .promo-applied-row{
+    display:flex;align-items:flex-start;justify-content:space-between;gap:8px;
+    background:#fff4e8;border:1px dashed var(--primary);border-radius:10px;
+    padding:10px 12px;font-size:13px;color:var(--primary-dark);font-weight:700;
+  }
+  .promo-applied-row .promo-remove-btn{
+    font-weight:600;font-size:12px;background:none;border:none;color:var(--muted);
+    text-decoration:underline;cursor:pointer;padding:0;flex-shrink:0;
+  }
+  .promo-warning{display:block;font-weight:600;color:#b23b3b;font-size:11.5px;margin-top:3px;}
+
   .empty-state{padding:60px 24px;text-align:center;color:var(--muted);}
   .empty-state h3{color:var(--text);margin-bottom:16px;}
 
