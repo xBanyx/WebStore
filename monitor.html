@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>System Monitor — My Restaurant</title>
+<link rel="icon" type="image/x-icon" href="rhj_icon.ico">
+<link rel="stylesheet" href="admin.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="firebase-config.js"></script>
+<style>
+  /* Page-specific bits — everything else borrows admin.css */
+  .mon-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;}
+  .mon-card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px;}
+  .mon-card .mon-value{font-size:22px;font-weight:800;}
+  .mon-card .mon-label{font-size:11.5px;color:var(--muted);margin-top:2px;}
+  .mon-card .mon-sub{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4;}
+  .mon-card.warn{border:1.5px solid #f0c896;background:#fff8ee;}
+  .mon-card.bad{border:1.5px solid #e3aeae;background:#fdf1f1;}
+
+  .health-row{
+    display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px;
+  }
+  .health-row:last-child{border-bottom:none;}
+  .health-icon{width:20px;flex-shrink:0;text-align:center;padding-top:1px;}
+  .health-icon.ok{color:#1e7a3d;}
+  .health-icon.warn{color:#b8860c;}
+  .health-icon.bad{color:#b23b3b;}
+  .health-icon.info{color:#8a8078;}
+  .health-text strong{display:block;font-size:13px;}
+  .health-text span{display:block;font-size:12px;color:var(--muted);margin-top:1px;line-height:1.4;}
+
+  .feed-row{
+    display:flex;align-items:flex-start;justify-content:space-between;gap:10px;
+    padding:10px 0;border-bottom:1px solid var(--border);font-size:12.5px;
+  }
+  .feed-row:last-child{border-bottom:none;}
+  .feed-main{min-width:0;}
+  .feed-main .fnum{font-weight:800;font-size:13px;}
+  .feed-main .fmeta{color:var(--muted);font-size:11.5px;margin-top:1px;}
+  .feed-right{text-align:right;flex-shrink:0;}
+  .feed-right .ftime{color:var(--muted);font-size:11px;white-space:nowrap;}
+
+  .last-refresh{font-size:11px;color:var(--muted);text-align:center;margin-top:4px;}
+  .mon-empty{color:var(--muted);font-size:13px;text-align:center;padding:20px 10px;}
+  .refresh-btn{background:none;color:var(--primary-dark);font-size:12px;font-weight:700;padding:4px 6px;}
+</style>
+</head>
+<body>
+
+<!-- ============== LOGIN SCREEN — same pattern as stats.html/orders.html ============== -->
+<div id="login-screen" class="login-wrap">
+  <div class="login-card">
+    <h2>System Monitor</h2>
+    <div id="login-firebase">
+      <p>Sign in with your admin account to view system status.</p>
+      <input type="email" id="login-email" placeholder="Email" autocomplete="username">
+      <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+      <div class="login-error" id="login-error"></div>
+      <button class="btn btn-primary btn-block" onclick="attemptLogin()">Log In</button>
+      <button class="link-btn" style="margin-top:10px;width:100%;text-align:center;" onclick="forgotPassword()">Forgot password?</button>
+    </div>
+    <div id="login-legacy" hidden>
+      <p>Enter the admin password to view system status.</p>
+      <input type="password" id="login-password-legacy" placeholder="Password" autocomplete="current-password">
+      <div class="login-error" id="login-error-legacy">Incorrect password.</div>
+      <button class="btn btn-primary btn-block" onclick="attemptLegacyLogin()">Log In</button>
+      <div class="login-note" style="color:#b23b3b;">
+        <i class="fa-solid fa-triangle-exclamation"></i> Firebase isn't configured, so this page is using a weak, insecure
+        client-side password. Fill in firebase-config.js and set up Firebase Authentication for real login security.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============== MONITOR APP (hidden until logged in) ============== -->
+<div id="app" hidden>
+
+  <div class="topbar">
+    <button class="menu-toggle" onclick="openSidebar()" aria-label="Open menu"><i class="fa-solid fa-bars"></i></button>
+    <h1>System Monitor</h1>
+    <span class="sync-badge" id="sync-badge">Checking sync…</span>
+  </div>
+
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-title">System Monitor</span>
+      <button class="sidebar-close" onclick="closeSidebar()" aria-label="Close menu">×</button>
+    </div>
+    <div class="sidebar-links">
+      <a class="sidebar-link" href="admin.html"><i class="fa-solid fa-clipboard-list"></i> Menu Admin</a>
+      <a class="sidebar-link" href="orders.html"><i class="fa-solid fa-receipt"></i> Orders</a>
+      <a class="sidebar-link" href="stats.html"><i class="fa-solid fa-chart-line"></i> Statistics</a>
+      <a class="sidebar-link" href="trash.html"><i class="fa-solid fa-trash"></i> Trash</a>
+      <span class="sidebar-link current"><i class="fa-solid fa-gauge-high"></i> Monitor</span>
+      <a class="sidebar-link" href="index.html" target="_blank"><i class="fa-solid fa-arrow-up-right-from-square"></i> View Store</a>
+    </div>
+    <div class="sidebar-footer">
+      <button class="sidebar-link logout" onclick="logOut()">Log Out</button>
+    </div>
+  </nav>
+
+  <div class="section">
+
+    <div class="section-title">Overview</div>
+    <div class="mon-grid" id="mon-overview"></div>
+
+    <div class="section-title">Health Checks</div>
+    <div class="card" id="mon-health"></div>
+
+    <div class="section-title">Orders by Status</div>
+    <div class="mon-grid" id="mon-order-status"></div>
+
+    <div class="section-title">Recent Order Activity</div>
+    <div class="card">
+      <div id="mon-feed"></div>
+    </div>
+
+    <div class="section-title">Promo Codes</div>
+    <div class="card" id="mon-promos"></div>
+
+    <div class="section-title">Team &amp; Access</div>
+    <div class="card" id="mon-team"></div>
+
+    <p class="last-refresh" id="mon-last-refresh"></p>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ========================================================
+   Same login/session pattern used across admin.html, orders.html,
+   stats.html and trash.html — this page just reads data, it never
+   writes anything, so it's safe to add without touching the others.
+   ======================================================== */
+const ADMIN_PASSWORD_FALLBACK = "admin123";
+const ADMIN_SESSION_KEY = "myresto_admin_session_v1";
+
+const PRODUCTS_STORAGE_KEY = "myresto_products_v1";
+const ORDERS_STORAGE_KEY   = "myresto_orders_v1";
+const CONFIG_STORAGE_KEY   = "myresto_config_v1";
+const MAINTENANCE_STORAGE_KEY = "myresto_maintenance_v1";
+
+const FIREBASE_ENABLED = typeof FIREBASE_CONFIG !== 'undefined' &&
+  !!FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('YOUR_');
+
+let db = null, auth = null;
+if(FIREBASE_ENABLED){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  db = firebase.firestore();
+  auth = firebase.auth();
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+}
+
+function updateSyncBadge(){
+  const el = document.getElementById('sync-badge');
+  if(!el) return;
+  if(FIREBASE_ENABLED){
+    el.innerHTML = '<i class="fa-solid fa-cloud"></i> Cloud sync on';
+    el.classList.add('on'); el.classList.remove('off');
+  } else {
+    el.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Local only';
+    el.classList.add('off'); el.classList.remove('on');
+    el.title = "Most of this page needs Firebase to show data from every visitor/device.";
+  }
+}
+
+/* ======================= SIDEBAR ======================= */
+function openSidebar(){
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sidebar-overlay').classList.add('show');
+}
+function closeSidebar(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('show');
+}
+document.addEventListener('keydown', e=>{ if(e.key === 'Escape') closeSidebar(); });
+
+/* ======================= LOGIN ======================= */
+(function initLoginMode(){
+  document.getElementById('login-firebase').hidden = !FIREBASE_ENABLED;
+  document.getElementById('login-legacy').hidden = FIREBASE_ENABLED;
+})();
+
+if(FIREBASE_ENABLED){
+  auth.onAuthStateChanged(user=>{
+    if(user){
+      document.getElementById('login-screen').hidden = true;
+      document.getElementById('app').hidden = false;
+      localStorage.setItem(ADMIN_SESSION_KEY, '1');
+      boot();
+    } else {
+      document.getElementById('app').hidden = true;
+      document.getElementById('login-screen').hidden = false;
+      localStorage.removeItem(ADMIN_SESSION_KEY);
+    }
+  });
+}
+
+function attemptLogin(){
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  if(!email || !password){ errEl.textContent = 'Enter your email and password.'; errEl.style.display = 'block'; return; }
+  auth.signInWithEmailAndPassword(email, password)
+    .catch(e=>{ errEl.textContent = friendlyAuthError(e); errEl.style.display = 'block'; });
+}
+document.getElementById('login-password').addEventListener('keydown', e=>{ if(e.key === 'Enter') attemptLogin(); });
+document.getElementById('login-password-legacy').addEventListener('keydown', e=>{ if(e.key === 'Enter') attemptLegacyLogin(); });
+
+function forgotPassword(){
+  const email = document.getElementById('login-email').value.trim();
+  const errEl = document.getElementById('login-error');
+  if(!email){ errEl.textContent = 'Enter your email above first, then tap "Forgot password?" again.'; errEl.style.display = 'block'; return; }
+  auth.sendPasswordResetEmail(email)
+    .then(()=>{ errEl.style.color = '#1e7a3d'; errEl.textContent = `Password reset email sent to ${email}.`; errEl.style.display = 'block'; })
+    .catch(e=>{ errEl.style.color = ''; errEl.textContent = friendlyAuthError(e); errEl.style.display = 'block'; });
+}
+
+function friendlyAuthError(e){
+  switch(e.code){
+    case 'auth/invalid-email': return 'That email address doesn\'t look right.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential': return 'Incorrect email or password.';
+    case 'auth/too-many-requests': return 'Too many attempts — please wait a bit and try again.';
+    default: return e.message || 'Something went wrong. Please try again.';
+  }
+}
+
+function attemptLegacyLogin(){
+  const val = document.getElementById('login-password-legacy').value;
+  if(val === ADMIN_PASSWORD_FALLBACK){
+    document.getElementById('login-screen').hidden = true;
+    document.getElementById('app').hidden = false;
+    localStorage.setItem(ADMIN_SESSION_KEY, '1');
+    boot();
+  } else {
+    document.getElementById('login-error-legacy').style.display = 'block';
+  }
+}
+
+function logOut(){
+  if(FIREBASE_ENABLED){
+    auth.signOut();
+  } else {
+    document.getElementById('app').hidden = true;
+    document.getElementById('login-screen').hidden = false;
+    localStorage.removeItem(ADMIN_SESSION_KEY);
+  }
+}
+
+/* ======================= STATE ======================= */
+let PRODUCTS = [], ORDERS = [], PROMOS = [], ADMINS = [], PRESENCE = [], TOTAL_VISITS = 0;
+let CONFIG = {}, MAINTENANCE = { enabled:false, message:'' };
+let lastError = null;
+
+function loadLocalJSON(key, fallback){
+  try{ const raw = localStorage.getItem(key); const parsed = raw ? JSON.parse(raw) : null; return parsed ?? fallback; }
+  catch(e){ return fallback; }
+}
+
+async function boot(){
+  updateSyncBadge();
+
+  // Local caches give an instant first paint even before Firestore answers.
+  PRODUCTS = loadLocalJSON(PRODUCTS_STORAGE_KEY, []);
+  ORDERS = loadLocalJSON(ORDERS_STORAGE_KEY, []);
+  CONFIG = loadLocalJSON(CONFIG_STORAGE_KEY, {});
+  MAINTENANCE = loadLocalJSON(MAINTENANCE_STORAGE_KEY, { enabled:false, message:'' });
+  renderAll();
+
+  if(!FIREBASE_ENABLED) return;
+
+  db.collection('stores').doc('main').onSnapshot(snap=>{
+    const data = snap.data() || {};
+    if(data.config) CONFIG = data.config;
+    if(typeof data.maintenanceMode === 'boolean') MAINTENANCE.enabled = data.maintenanceMode;
+    if(typeof data.maintenanceMessage === 'string') MAINTENANCE.message = data.maintenanceMessage;
+    renderAll();
+  }, err=>{ lastError = 'store config: ' + err.message; renderAll(); });
+
+  db.collection('products').onSnapshot(snap=>{
+    PRODUCTS = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    renderAll();
+  }, err=>{ lastError = 'products: ' + err.message; renderAll(); });
+
+  db.collection('orders').onSnapshot(snap=>{
+    ORDERS = snap.docs.map(d => d.data());
+    renderAll();
+  }, err=>{ lastError = 'orders: ' + err.message; renderAll(); });
+
+  db.collection('promoCodes').onSnapshot(snap=>{
+    PROMOS = snap.docs.map(d => d.data());
+    renderAll();
+  }, err=>{ lastError = 'promo codes: ' + err.message; renderAll(); });
+
+  db.collection('admins').onSnapshot(snap=>{
+    ADMINS = snap.docs.map(d => ({ uid:d.id, ...d.data() }));
+    renderAll();
+  }, err=>{ /* admins collection may be locked down for non-main admins — ignore silently */ });
+
+  db.collection('presence').onSnapshot(snap=>{
+    PRESENCE = snap.docs.map(d => d.data());
+    renderAll();
+  }, err=>{ /* optional feature */ });
+  setInterval(renderAll, 15000); // ages "online" out after 60s of no heartbeat
+
+  db.collection('stats').doc('visits').onSnapshot(snap=>{
+    TOTAL_VISITS = (snap.exists && snap.data().total) || 0;
+    renderAll();
+  }, err=>{ /* optional feature */ });
+}
+
+/* ======================= HELPERS ======================= */
+function money(n){ return "₱" + Number(n||0).toLocaleString('en-PH'); }
+function countOnline(){
+  const cutoff = Date.now() - 60000;
+  return PRESENCE.filter(p => p.lastSeen && p.lastSeen.toDate && p.lastSeen.toDate().getTime() > cutoff).length;
+}
+function approxDocBytes(obj){
+  try{ return new Blob([JSON.stringify(obj)]).size; }catch(e){ return 0; }
+}
+function timeAgo(iso){
+  if(!iso) return '—';
+  const ms = Date.now() - new Date(iso).getTime();
+  if(ms < 0) return 'just now';
+  const mins = Math.floor(ms/60000);
+  if(mins < 1) return 'just now';
+  if(mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins/60);
+  if(hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs/24);
+  return `${days}d ago`;
+}
+
+/* ======================= RENDER ======================= */
+function renderAll(){
+  renderOverview();
+  renderHealth();
+  renderOrderStatus();
+  renderFeed();
+  renderPromos();
+  renderTeam();
+  document.getElementById('mon-last-refresh').textContent =
+    'Live — updates automatically. Last refreshed ' + new Date().toLocaleTimeString('en-PH');
+}
+
+function renderOverview(){
+  const active = ORDERS.filter(o => !o.deleted);
+  const trashedCount = ORDERS.filter(o => o.deleted).length;
+  const visibleProducts = PRODUCTS.filter(p => p.available !== false).length;
+
+  const cards = [
+    { value: PRODUCTS.length, label: 'Menu Items', sub: `${visibleProducts} visible on storefront` },
+    { value: active.length, label: 'Active Orders', sub: `${trashedCount} in Trash` },
+    { value: FIREBASE_ENABLED ? countOnline() : '—', label: 'Online Now', sub: FIREBASE_ENABLED ? 'Heartbeat in the last 60s' : 'Needs Firebase' },
+    { value: FIREBASE_ENABLED ? TOTAL_VISITS.toLocaleString() : '—', label: 'Total Visits', sub: FIREBASE_ENABLED ? 'All-time counter' : 'Needs Firebase' }
+  ];
+
+  document.getElementById('mon-overview').innerHTML = cards.map(c => `
+    <div class="mon-card">
+      <div class="mon-value">${c.value}</div>
+      <div class="mon-label">${c.label}</div>
+      <div class="mon-sub">${c.sub}</div>
+    </div>
+  `).join('');
+}
+
+function renderOrderStatus(){
+  const active = ORDERS.filter(o => !o.deleted);
+  const counts = { pending:0, approved:0, completed:0, cancelled:0 };
+  active.forEach(o => { const s = o.status || 'pending'; if(counts[s] !== undefined) counts[s]++; });
+  const revenue = active.filter(o => o.status === 'completed').reduce((s,o) => s + (o.total||0), 0);
+
+  const cards = [
+    { value: counts.pending, label: 'Pending', cls:'' },
+    { value: counts.approved, label: 'Approved', cls:'' },
+    { value: counts.completed, label: 'Completed', cls:'' },
+    { value: counts.cancelled, label: 'Cancelled', cls:'' },
+  ];
+  document.getElementById('mon-order-status').innerHTML = cards.map(c => `
+    <div class="mon-card">
+      <div class="mon-value">${c.value}</div>
+      <div class="mon-label">${c.label}</div>
+    </div>
+  `).join('') + `
+    <div class="mon-card" style="grid-column:1 / -1;">
+      <div class="mon-value">${money(revenue)}</div>
+      <div class="mon-label">Revenue from completed orders</div>
+    </div>
+  `;
+}
+
+function renderFeed(){
+  const wrap = document.getElementById('mon-feed');
+  const recent = ORDERS.slice()
+    .sort((a,b) => (b.dateISO||'').localeCompare(a.dateISO||''))
+    .slice(0, 10);
+
+  if(!recent.length){
+    wrap.innerHTML = `<p class="mon-empty">No orders yet.</p>`;
+    return;
+  }
+
+  wrap.innerHTML = recent.map(o => {
+    const status = o.status || 'pending';
+    return `
+      <div class="feed-row">
+        <div class="feed-main">
+          <div class="fnum">${o.orderNumber || '—'} ${o.deleted ? '<span style="color:#b23b3b;">(trashed)</span>' : ''}</div>
+          <div class="fmeta">${o.customerName || 'Unknown'} · ${money(o.total)}</div>
+        </div>
+        <div class="feed-right">
+          <span class="status-badge status-${status}">${status.charAt(0).toUpperCase()+status.slice(1)}</span>
+          <div class="ftime">${timeAgo(o.dateISO)}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderPromos(){
+  const wrap = document.getElementById('mon-promos');
+  if(!FIREBASE_ENABLED){
+    wrap.innerHTML = `<p class="mon-empty">Promo codes need cloud sync (Firebase) to track redemptions.</p>`;
+    return;
+  }
+  if(!PROMOS.length){
+    wrap.innerHTML = `<p class="mon-empty">No promo codes created yet.</p>`;
+    return;
+  }
+  const now = Date.now();
+  const active = PROMOS.filter(p => p.active !== false).length;
+  const expiredButActive = PROMOS.filter(p => p.active !== false && p.endAt && new Date(p.endAt).getTime() < now);
+  const exhausted = PROMOS.filter(p => p.active !== false && p.maxRedemptions && (p.redeemedCount||0) >= p.maxRedemptions);
+
+  let html = `<div class="health-row">
+    <div class="health-icon info"><i class="fa-solid fa-tag"></i></div>
+    <div class="health-text"><strong>${PROMOS.length} promo code${PROMOS.length===1?'':'s'} total</strong><span>${active} currently marked active</span></div>
+  </div>`;
+
+  if(expiredButActive.length){
+    html += `<div class="health-row">
+      <div class="health-icon warn"><i class="fa-solid fa-triangle-exclamation"></i></div>
+      <div class="health-text"><strong>${expiredButActive.length} code${expiredButActive.length===1?'':'s'} past expiry but still marked active</strong>
+      <span>${expiredButActive.map(p=>p.code).join(', ')} — customers can't redeem them (expiry is checked), but consider turning them off in admin.html</span></div>
+    </div>`;
+  }
+  if(exhausted.length){
+    html += `<div class="health-row">
+      <div class="health-icon warn"><i class="fa-solid fa-circle-check"></i></div>
+      <div class="health-text"><strong>${exhausted.length} code${exhausted.length===1?'':'s'} hit their redemption limit</strong>
+      <span>${exhausted.map(p=>p.code).join(', ')}</span></div>
+    </div>`;
+  }
+  wrap.innerHTML = html;
+}
+
+function renderTeam(){
+  const wrap = document.getElementById('mon-team');
+  if(!FIREBASE_ENABLED){
+    wrap.innerHTML = `<p class="mon-empty">Team accounts need Firebase Authentication.</p>`;
+    return;
+  }
+  if(!ADMINS.length){
+    wrap.innerHTML = `<p class="mon-empty">Admin list not visible to this account, or none registered yet.</p>`;
+    return;
+  }
+  const mains = ADMINS.filter(a => !a.role || a.role === 'main').length;
+  const staff = ADMINS.length - mains;
+  wrap.innerHTML = `
+    <div class="health-row">
+      <div class="health-icon info"><i class="fa-solid fa-users"></i></div>
+      <div class="health-text"><strong>${ADMINS.length} admin account${ADMINS.length===1?'':'s'}</strong>
+      <span>${mains} main admin${mains===1?'':'s'} (can permanently delete from Trash) · ${staff} staff account${staff===1?'':'s'}</span></div>
+    </div>
+  `;
+}
+
+function renderHealth(){
+  const checks = [];
+
+  // Cloud sync
+  checks.push(FIREBASE_ENABLED
+    ? { level:'ok', title:'Cloud sync is on', detail:'Every visitor and device shares the same live data.' }
+    : { level:'bad', title:'Cloud sync is off', detail:'firebase-config.js is not filled in — the whole site is running in local-only mode, and most of this page can\'t show anything meaningful.' });
+
+  if(lastError){
+    checks.push({ level:'bad', title:'A Firestore read failed', detail: lastError });
+  }
+
+  // Menu
+  if(PRODUCTS.length === 0){
+    checks.push({ level:'warn', title:'Menu is empty', detail:'No items in the menu yet — add some from Menu Admin.' });
+  } else {
+    const visible = PRODUCTS.filter(p => p.available !== false).length;
+    if(visible === 0){
+      checks.push({ level:'warn', title:'Every menu item is hidden', detail:'All items have "Visible on menu" turned off — customers will see an empty menu.' });
+    }
+    const missingImage = PRODUCTS.filter(p => !p.images || !p.images.length).length;
+    if(missingImage){
+      checks.push({ level:'warn', title:`${missingImage} item${missingImage===1?'':'s'} have no photo`, detail:'These will show a broken/blank image on the storefront.' });
+    }
+    const nearLimit = PRODUCTS.filter(p => approxDocBytes(p) > 700000);
+    if(nearLimit.length){
+      checks.push({ level:'bad', title:`${nearLimit.length} item${nearLimit.length===1?'':'s'} close to Firestore's 1MB document limit`, detail:`${nearLimit.map(p=>p.name).join(', ')} — remove an extra photo from each to be safe.` });
+    }
+  }
+
+  // Config
+  if(!CONFIG.logo){
+    checks.push({ level:'warn', title:'No logo set', detail:'Set one in Store Info so the storefront and receipts don\'t use the default placeholder.' });
+  }
+  if(!CONFIG.banners || !CONFIG.banners.length){
+    checks.push({ level:'warn', title:'No banners set', detail:'The storefront banner carousel will be empty.' });
+  }
+  const d = CONFIG.delivery;
+  if(d && d.enabled && (d.shopLat == null || d.shopLng == null)){
+    checks.push({ level:'bad', title:'Delivery is on but no shop location is set', detail:'Delivery fees can\'t be calculated — set your shop pin in Delivery Settings.' });
+  }
+
+  // Maintenance mode
+  checks.push(MAINTENANCE.enabled
+    ? { level:'warn', title:'Maintenance mode is ON', detail:'Customers currently see the "We\'ll Be Right Back" page instead of the storefront.' }
+    : { level:'ok', title:'Maintenance mode is off', detail:'The storefront is live for customers.' });
+
+  // Orders needing attention
+  const stalePending = ORDERS.filter(o => !o.deleted && (o.status||'pending') === 'pending' &&
+    o.dateISO && (Date.now() - new Date(o.dateISO).getTime()) > 2*60*60*1000);
+  if(stalePending.length){
+    checks.push({ level:'warn', title:`${stalePending.length} order${stalePending.length===1?'':'s'} pending for over 2 hours`, detail:'Check Orders — customers may be waiting on approval.' });
+  }
+
+  const trashedCount = ORDERS.filter(o => o.deleted).length;
+  if(trashedCount > 20){
+    checks.push({ level:'info', title:`${trashedCount} orders sitting in Trash`, detail:'Consider having a main admin empty old ones permanently.' });
+  }
+
+  document.getElementById('mon-health').innerHTML = checks.map(c => {
+    const icon = c.level==='ok' ? 'fa-circle-check' : c.level==='bad' ? 'fa-circle-xmark' : c.level==='warn' ? 'fa-triangle-exclamation' : 'fa-circle-info';
+    return `
+      <div class="health-row">
+        <div class="health-icon ${c.level}"><i class="fa-solid ${icon}"></i></div>
+        <div class="health-text"><strong>${c.title}</strong><span>${c.detail}</span></div>
+      </div>
+    `;
+  }).join('');
+}
+
+/* ======================= TOAST ======================= */
+let toastTimer;
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 1800);
+}
+</script>
+</body>
+</html>
